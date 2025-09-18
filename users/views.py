@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import serializers
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import permission_classes
 from . serializers import UserSerializer,UpdateProfileSerializer,RegistrationSerializer
 from . models import Profile
@@ -13,6 +13,7 @@ from django.contrib.auth import authenticate, login,logout
 
 # registration
 class RegistrationView(APIView):
+    permission_classes = [AllowAny]
     def get(self,request):
         if request.user.is_authenticated:
             return redirect('dashboard')
@@ -31,6 +32,7 @@ class RegistrationView(APIView):
 
 # Login
 class LoginView(APIView):
+    permission_classes = [AllowAny]
     def post(self,request):
         try:
             username = request.data.get('username')
@@ -44,6 +46,7 @@ class LoginView(APIView):
             return Response({'error':str(e)}, status = status.HTTP_INTERNAL_SERVER_ERROR)
 # Logout
 class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self,request):
         try:
             logout(request)
@@ -52,8 +55,8 @@ class LogoutView(APIView):
             return Response({'error':str(e)}, status = status.HTTP_INTERNAL_SERVER_ERROR)
 
 # dashboard
-@permission_classes([IsAuthenticated])
 class DashboardView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self,request):
         try:
             user = request.user.profile

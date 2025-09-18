@@ -25,7 +25,7 @@ INSTALLED_APPS = [
     'corsheaders',
     # local apps
     'users.apps.UsersConfig',
-    # 'estyecomapp.apps.EstyecomappConfig',
+    'estyecomapp.apps.EstyecomappConfig',
 ]
 
 MIDDLEWARE = [
