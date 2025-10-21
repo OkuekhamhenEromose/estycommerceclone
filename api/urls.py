@@ -7,7 +7,7 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # path('api/estyecomapp/',include('estyecomapp.urls')),
+    path('api/estyecomapp/',include('estyecomapp.urls')),
     path('api/users/',include('users.urls')),
     # jwt
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
