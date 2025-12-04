@@ -8,9 +8,16 @@ urlpatterns = [
     # Categories
     path('categories/', views.CategoryView.as_view(), name='category-list'),
     path('category/<slug:slug>/', views.CategoryDetailView.as_view(), name='category-detail'),
+    path('category/<slug:slug>/products/', views.CategoryProductsView.as_view(), name='category-products'),
+    
+    # Category Groups (Gifts, Fashion Finds, Home Favourites)
+    path('category-groups/', views.CategoryGroupsView.as_view(), name='category-groups'),
     
     # Navigation
     path('navigation/', views.NavigationView.as_view(), name='navigation'),
+    
+    # Top 100 Gifts
+    path('top-100-gifts/', views.Top100GiftsView.as_view(), name='top-100-gifts'),
     
     # Products
     path('products/', views.ProductView.as_view(), name='product-list'),
@@ -24,6 +31,9 @@ urlpatterns = [
     
     # Tags
     path('tags/', views.TagView.as_view(), name='tag-list'),
+    
+    # Product Sizes
+    path('product-sizes/', views.ProductSizeView.as_view(), name='product-sizes'),
     
     # Wishlist
     path('wishlist/', views.WishlistView.as_view(), name='wishlist'),

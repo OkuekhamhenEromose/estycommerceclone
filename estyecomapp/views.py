@@ -1,4 +1,4 @@
-from rest_framework import status, permissions, filters
+from rest_framework import status, permissions
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -6,7 +6,7 @@ from rest_framework.pagination import PageNumberPagination
 
 from django.shortcuts import reverse, get_object_or_404
 from django.db import transaction
-from django.db.models import Q, Avg, Count
+from django.db.models import Q, Avg, Count, Prefetch
 from django.conf import settings
 
 import requests
@@ -111,6 +111,47 @@ class CategoryDetailView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+#::::: CATEGORY WITH PRODUCTS VIEW :::::
+class CategoryProductsView(APIView):
+    """Get category with all its products"""
+    pagination_class = StandardResultsSetPagination
+    
+    def get(self, request, slug):
+        try:
+            category = get_object_or_404(Category, slug=slug, is_active=True)
+            
+            # Get all products including from subcategories
+            products = Product.objects.filter(
+                Q(category=category) | Q(category__parent=category),
+                is_available=True
+            ).distinct()
+            
+            # Apply filters
+            min_price = request.query_params.get('min_price', None)
+            max_price = request.query_params.get('max_price', None)
+            if min_price:
+                products = products.filter(price__gte=min_price)
+            if max_price:
+                products = products.filter(price__lte=max_price)
+            
+            # Sort
+            sort_by = request.query_params.get('sort', '-created')
+            products = products.order_by(sort_by)
+            
+            # Pagination
+            paginator = self.pagination_class()
+            paginated_products = paginator.paginate_queryset(products, request)
+            
+            response_data = {
+                'category': CategoryDetailSerializer(category).data,
+                'products': ProductListSerializer(paginated_products, many=True).data,
+                'total_products': products.count()
+            }
+            
+            return paginator.get_paginated_response(response_data)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 #::::: NAVIGATION STRUCTURE VIEW :::::
 class NavigationView(APIView):
     """Get complete navigation structure for frontend"""
@@ -134,9 +175,55 @@ class NavigationView(APIView):
                     category_type='gift_popular', 
                     is_active=True
                 ),
+                'gifts_section': Category.objects.filter(
+                    category_type='gifts',
+                    is_active=True
+                ),
+                'fashion_finds': Category.objects.filter(
+                    category_type='fashion_finds',
+                    is_active=True
+                ),
+                'home_favourites': Category.objects.filter(
+                    category_type='home_favourites',
+                    is_active=True
+                ),
             }
             
             serializer = NavigationSerializer(data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#::::: TOP 100 GIFTS VIEW :::::
+class Top100GiftsView(APIView):
+    """Get Top 100 Gifts collection"""
+    def get(self, request):
+        try:
+            # Get or create the Top 100 collection
+            collection = Top100Gifts.objects.filter(is_active=True).first()
+            
+            if not collection:
+                return Response(
+                    {'message': 'Top 100 Gifts collection not available'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Auto-populate if needed
+            if collection.auto_populate:
+                collection.populate_products()
+            
+            # Check if requesting random selection
+            random_selection = request.query_params.get('random', 'false')
+            
+            if random_selection == 'true':
+                count = int(request.query_params.get('count', 20))
+                serializer = Top100GiftsRandomSerializer(
+                    collection,
+                    context={'random_count': count}
+                )
+            else:
+                serializer = Top100GiftsSerializer(collection)
+            
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -156,6 +243,7 @@ class ProductView(APIView):
                 products = products.filter(
                     Q(title__icontains=search) | 
                     Q(description__icontains=search) |
+                    Q(short_description__icontains=search) |
                     Q(tags__name__icontains=search)
                 ).distinct()
             
@@ -184,6 +272,11 @@ class ProductView(APIView):
             if condition:
                 products = products.filter(condition=condition)
             
+            # Filter by color
+            color = request.query_params.get('color', None)
+            if color:
+                products = products.filter(color__icontains=color)
+            
             # Filter featured products
             is_featured = request.query_params.get('featured', None)
             if is_featured == 'true':
@@ -198,6 +291,16 @@ class ProductView(APIView):
             is_deal = request.query_params.get('deal', None)
             if is_deal == 'true':
                 products = products.filter(is_deal=True)
+            
+            # Filter new arrivals
+            is_new = request.query_params.get('new_arrival', None)
+            if is_new == 'true':
+                products = products.filter(is_new_arrival=True)
+            
+            # Filter in stock only
+            in_stock_only = request.query_params.get('in_stock', None)
+            if in_stock_only == 'true':
+                products = products.filter(in_stock__gt=0)
             
             # Price range filter
             min_price = request.query_params.get('min_price', None)
@@ -216,7 +319,8 @@ class ProductView(APIView):
             sort_by = request.query_params.get('sort', '-created')
             valid_sorts = [
                 'price', '-price', 'title', '-title', 
-                'rating', '-rating', 'created', '-created'
+                'rating', '-rating', 'created', '-created',
+                'review_count', '-review_count'
             ]
             if sort_by in valid_sorts:
                 products = products.order_by(sort_by)
@@ -383,6 +487,7 @@ class AddToCartView(APIView):
             
             cart_id = request.session.get('cart_id', None)
             quantity = int(request.data.get('quantity', 1))
+            size_id = request.data.get('size_id', None)
             
             with transaction.atomic():
                 if cart_id:
@@ -399,8 +504,16 @@ class AddToCartView(APIView):
                     cart.profile = request.user.profile
                     cart.save()
                 
-                # Check if product already in cart
-                cart_product = cart.items.filter(product=product).first()
+                # Get size if provided
+                selected_size = None
+                if size_id:
+                    selected_size = ProductSize.objects.filter(id=size_id).first()
+                
+                # Check if product with same size already in cart
+                cart_product = cart.items.filter(
+                    product=product,
+                    selected_size=selected_size
+                ).first()
                 
                 if cart_product:
                     new_quantity = cart_product.quantity + quantity
@@ -426,7 +539,8 @@ class AddToCartView(APIView):
                     cart_product = CartProduct.objects.create(
                         cart=cart,
                         product=product,
-                        quantity=quantity
+                        quantity=quantity,
+                        selected_size=selected_size
                     )
                     message = 'Item added to cart'
                 
@@ -569,12 +683,15 @@ class CheckoutView(APIView):
                     
                     # Create order items
                     for cart_item in cart.items.all():
+                        size_name = cart_item.selected_size.code if cart_item.selected_size else None
+                        
                         OrderItem.objects.create(
                             order=order,
                             product=cart_item.product,
                             product_name=cart_item.product.title,
                             product_price=cart_item.product.final_price,
                             quantity=cart_item.quantity,
+                            selected_size=size_name,
                             subtotal=cart_item.subtotal
                         )
                         
@@ -743,6 +860,44 @@ class HomepageSectionsView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+#::::: CATEGORY GROUPS VIEW :::::
+class CategoryGroupsView(APIView):
+    """Get organized category groups with their products"""
+    def get(self, request):
+        try:
+            # Get category type from query params
+            category_type = request.query_params.get('type', None)
+            
+            if category_type:
+                categories = Category.objects.filter(
+                    category_type=category_type,
+                    is_active=True
+                )
+            else:
+                # Get all main category types
+                categories = Category.objects.filter(
+                    category_type__in=['gifts', 'fashion_finds', 'home_favourites'],
+                    is_active=True
+                )
+            
+            result = []
+            for category in categories:
+                # Get featured and top rated products
+                all_products = category.get_all_products()
+                featured = [p for p in all_products if p.is_featured][:10]
+                top_rated = category.get_top_rated_products(limit=10)
+                
+                result.append({
+                    'category': CategoryDetailSerializer(category).data,
+                    'featured_products': ProductListSerializer(featured, many=True).data,
+                    'top_rated_products': ProductListSerializer(top_rated, many=True).data,
+                    'product_count': len(all_products)
+                })
+            
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 #::::: BRAND VIEW :::::
 class BrandView(APIView):
     def get(self, request):
@@ -759,6 +914,22 @@ class TagView(APIView):
         try:
             tags = Tag.objects.all()
             serializer = TagSerializer(tags, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#::::: PRODUCT SIZE VIEW :::::
+class ProductSizeView(APIView):
+    def get(self, request):
+        try:
+            sizes = ProductSize.objects.all()
+            
+            # Filter by category if provided
+            category = request.query_params.get('category', None)
+            if category:
+                sizes = sizes.filter(category=category)
+            
+            serializer = ProductSizeSerializer(sizes, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
