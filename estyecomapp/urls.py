@@ -2,6 +2,11 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Homepage Data
+    path('homepage/', views.HomepageDataView.as_view(), name='homepage-data'),
+    path('homepage/component/', views.ComponentSpecificDataView.as_view(), name='homepage-component'),
+    path('homepage/section/<str:section_type>/', views.HomepageSectionProductsView.as_view(), name='homepage-section'),
+
     # Parent Categories
     path('parent-categories/', views.ParentCategoryView.as_view(), name='parent-categories'),
     

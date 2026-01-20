@@ -6,12 +6,322 @@ from rest_framework.pagination import PageNumberPagination
 
 from django.shortcuts import reverse, get_object_or_404
 from django.db import transaction
-from django.db.models import Q, Avg, Count, Prefetch
+from django.db.models import Q, Avg, Count, Prefetch, F, ExpressionWrapper, DecimalField
 from django.conf import settings
 
 import requests
 from .serializers import *
 from .models import *
+
+# :::::::::::::::::::  HOMEPAGE DATA VIEWS  :::::::::::::::::
+
+class HomepageDataView(APIView):
+    """Get all data needed for homepage in a single optimized query"""
+    def get(self, request):
+        try:
+            # Use select_related and prefetch_related for optimization
+            sections = HomepageSection.objects.filter(
+                is_active=True
+            ).order_by('order').prefetch_related(
+                'products', 'categories'
+            )
+            
+            # Get deals products with discount percentage calculation
+            deals_products = Product.objects.filter(
+                is_deal=True, 
+                is_available=True,
+                in_stock__gt=0,
+                discount_price__isnull=False
+            ).annotate(
+                discount_percent=ExpressionWrapper(
+                    (F('price') - F('discount_price')) * 100 / F('price'),
+                    output_field=DecimalField(max_digits=5, decimal_places=2)
+                )
+            ).filter(discount_percent__gt=15).order_by('-discount_percent')[:20]
+            
+            # Get featured products
+            featured_products = Product.objects.filter(
+                is_featured=True,
+                is_available=True,
+                in_stock__gt=0
+            ).select_related('category', 'brand')[:20]
+            
+            # Get bestseller products
+            bestseller_products = Product.objects.filter(
+                is_bestseller=True,
+                is_available=True,
+                in_stock__gt=0
+            ).select_related('category', 'brand')[:20]
+            
+            # Get new arrival products (created in last 7 days)
+            from django.utils import timezone
+            week_ago = timezone.now() - timezone.timedelta(days=7)
+            new_arrival_products = Product.objects.filter(
+                is_new_arrival=True,
+                is_available=True,
+                in_stock__gt=0,
+                created__gte=week_ago
+            ).select_related('category', 'brand')[:20]
+            
+            # Get gift categories
+            gift_categories = Category.objects.filter(
+                category_type__in=['gifts', 'gift_occasion', 'gift_interest'],
+                is_active=True
+            ).prefetch_related('subcategories')[:8]
+            
+            # Get birthday categories
+            birthday_categories = Category.objects.filter(
+                Q(category_type='gift_occasion') & 
+                (Q(title__icontains='birthday') | Q(description__icontains='birthday')),
+                is_active=True
+            )[:6]
+            
+            # Get birthday products
+            birthday_products = Product.objects.filter(
+                Q(title__icontains='birthday') |
+                Q(description__icontains='birthday') |
+                Q(tags__name__icontains='birthday'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct()[:12]
+            
+            # Get vintage products for editor's picks
+            vintage_products = Product.objects.filter(
+                condition='vintage',
+                is_available=True,
+                in_stock__gt=0,
+                rating__gte=4.0
+            ).select_related('category', 'brand').order_by('-rating')[:15]
+            
+            # Get featured interests categories
+            featured_interests = Category.objects.filter(
+                category_type='gift_interest',
+                is_featured=True,
+                is_active=True
+            )[:8]
+            
+            # Get discover section categories (top-level)
+            discover_categories = Category.objects.filter(
+                parent__isnull=True,
+                is_active=True
+            ).prefetch_related('subcategories')[:8]
+            
+            # Get top 100 gifts
+            top100_products = []
+            top100_collection = Top100Gifts.objects.filter(is_active=True).first()
+            if top100_collection:
+                if top100_collection.auto_populate:
+                    top100_collection.populate_products()
+                top100_products = top100_collection.get_random_selection(20)
+            
+            # Get main categories with subcategories and products
+            main_categories = Category.objects.filter(
+                parent__isnull=True,
+                is_active=True
+            )[:8]
+            
+            categories_with_details = []
+            for category in main_categories:
+                subcategories = category.subcategories.filter(is_active=True)[:5]
+                products = Product.objects.filter(
+                    category=category,
+                    is_available=True,
+                    in_stock__gt=0
+                ).select_related('category', 'brand')[:8]
+                
+                category_data = CategoryListSerializer(category).data
+                category_data['subcategories'] = CategoryListSerializer(subcategories, many=True).data
+                category_data['featured_products'] = ProductListSerializer(products, many=True).data
+                categories_with_details.append(category_data)
+            
+            data = {
+                'hero_banner': {
+                    'message': 'Find something you love',
+                    'image': None,
+                    'search_placeholder': 'Search for anything'
+                },
+                'featured_interests': CategoryListSerializer(featured_interests, many=True).data,
+                'discover_section': CategoryListSerializer(discover_categories, many=True).data,
+                'birthday_gifts': {
+                    'categories': CategoryListSerializer(birthday_categories, many=True).data,
+                    'products': ProductListSerializer(birthday_products, many=True).data
+                },
+                'gift_categories': CategoryListSerializer(gift_categories, many=True).data,
+                'categories': categories_with_details,
+                'todays_deals': ProductListSerializer(deals_products, many=True).data,
+                'editors_picks_vintage': ProductListSerializer(vintage_products, many=True).data,
+                'top100_gifts': ProductListSerializer(top100_products, many=True).data,
+                'homepage_sections': HomepageSectionSerializer(sections, many=True).data,
+                'featured_products': ProductListSerializer(featured_products, many=True).data,
+                'bestseller_products': ProductListSerializer(bestseller_products, many=True).data,
+                'new_arrival_products': ProductListSerializer(new_arrival_products, many=True).data,
+            }
+            
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ComponentSpecificDataView(APIView):
+    """Get specific data for each homepage component"""
+    
+    def get(self, request):
+        component = request.query_params.get('component', None)
+        
+        try:
+            if component == 'featured_interests':
+                categories = Category.objects.filter(
+                    category_type='gift_interest',
+                    is_featured=True,
+                    is_active=True
+                ).prefetch_related('subcategories')[:10]
+                serializer = CategoryListSerializer(categories, many=True)
+                
+            elif component == 'birthday_gifts':
+                categories = Category.objects.filter(
+                    Q(title__icontains='birthday') |
+                    Q(description__icontains='birthday'),
+                    is_active=True
+                )[:6]
+                
+                products = Product.objects.filter(
+                    Q(title__icontains='birthday') |
+                    Q(description__icontains='birthday') |
+                    Q(tags__name__icontains='birthday'),
+                    is_available=True,
+                    in_stock__gt=0
+                ).distinct()[:12]
+                
+                data = {
+                    'categories': CategoryListSerializer(categories, many=True).data,
+                    'products': ProductListSerializer(products, many=True).data
+                }
+                return Response(data, status=status.HTTP_200_OK)
+                
+            elif component == 'gift_categories':
+                categories = Category.objects.filter(
+                    category_type__in=['gifts', 'gift_occasion', 'gift_interest', 'gift_popular'],
+                    is_active=True
+                ).prefetch_related('subcategories')[:12]
+                serializer = CategoryListSerializer(categories, many=True)
+                
+            elif component == 'todays_deals':
+                # Get deals with discount > 20%
+                products = Product.objects.filter(
+                    is_deal=True,
+                    is_available=True,
+                    in_stock__gt=0,
+                    discount_price__isnull=False
+                ).annotate(
+                    discount_percent=ExpressionWrapper(
+                        (F('price') - F('discount_price')) * 100 / F('price'),
+                        output_field=DecimalField(max_digits=5, decimal_places=2)
+                    )
+                ).filter(discount_percent__gt=20).order_by('-discount_percent')[:20]
+                
+                serializer = ProductListSerializer(products, many=True)
+                
+            elif component == 'editors_picks_vintage':
+                products = Product.objects.filter(
+                    condition='vintage',
+                    is_available=True,
+                    in_stock__gt=0,
+                    rating__gte=4.0
+                ).select_related('category', 'brand').order_by('-rating')[:15]
+                serializer = ProductListSerializer(products, many=True)
+                
+            elif component == 'categories':
+                categories = Category.objects.filter(
+                    parent__isnull=True,
+                    is_active=True
+                ).prefetch_related('subcategories')[:8]
+                
+                result = []
+                for category in categories:
+                    subcategories = category.subcategories.filter(is_active=True)[:5]
+                    products = Product.objects.filter(
+                        category=category,
+                        is_available=True,
+                        in_stock__gt=0
+                    ).select_related('category', 'brand')[:8]
+                    
+                    category_data = CategoryListSerializer(category).data
+                    category_data['subcategories'] = CategoryListSerializer(subcategories, many=True).data
+                    category_data['featured_products'] = ProductListSerializer(products, many=True).data
+                    result.append(category_data)
+                
+                return Response(result, status=status.HTTP_200_OK)
+                
+            else:
+                return Response(
+                    {'error': 'Invalid component specified'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class HomepageSectionProductsView(APIView):
+    """Get products for specific homepage section"""
+    
+    def get(self, request, section_type):
+        try:
+            section = get_object_or_404(
+                HomepageSection, 
+                section_type=section_type,
+                is_active=True
+            )
+            
+            if section.products.exists():
+                products = section.products.filter(
+                    is_available=True,
+                    in_stock__gt=0
+                ).select_related('category', 'brand')[:20]
+            else:
+                # Auto-generate products based on section type
+                if section_type == 'big_deals':
+                    products = Product.objects.filter(
+                        is_deal=True,
+                        is_available=True,
+                        in_stock__gt=0,
+                        discount_price__isnull=False
+                    ).annotate(
+                        discount_percent=ExpressionWrapper(
+                            (F('price') - F('discount_price')) * 100 / F('price'),
+                            output_field=DecimalField(max_digits=5, decimal_places=2)
+                        )
+                    ).filter(discount_percent__gt=15).order_by('-discount_percent')[:20]
+                elif section_type == 'featured_interests':
+                    products = Product.objects.filter(
+                        category__category_type='gift_interest',
+                        category__is_featured=True,
+                        is_available=True,
+                        in_stock__gt=0
+                    ).distinct()[:20]
+                elif section_type == 'vintage_guide':
+                    products = Product.objects.filter(
+                        condition='vintage',
+                        is_available=True,
+                        in_stock__gt=0
+                    )[:20]
+                else:
+                    products = Product.objects.filter(
+                        is_available=True,
+                        in_stock__gt=0
+                    ).select_related('category', 'brand').order_by('-rating')[:20]
+            
+            serializer = ProductListSerializer(products, many=True)
+            
+            return Response({
+                'section': HomepageSectionSerializer(section).data,
+                'products': serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 #::::: CUSTOM PAGINATION :::::
 class StandardResultsSetPagination(PageNumberPagination):
