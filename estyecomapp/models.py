@@ -506,6 +506,10 @@ class HomepageSection(models.Model):
         ('top_100_gifts', 'Top 100 Gifts'),
         ('fashion_finds', 'Fashion Finds'),
         ('home_favourites', 'Home Favourites'),
+        ('gift_guides', 'Best Gift Guides'),
+        ('valentines_gifts', 'Valentine\'s Day Gifts'),
+        ('bestselling_gifts', 'Best-Selling Gifts'),
+        ('personalized_presents', 'Presents to Personalize'),
     )
     
     title = models.CharField(max_length=200)
@@ -524,3 +528,67 @@ class HomepageSection(models.Model):
     
     def __str__(self):
         return self.title
+
+# Add new Gift Section models at the end of the file
+class GiftGuideSection(models.Model):
+    """Special sections for the gifts page"""
+    SECTION_CHOICES = (
+        ('best_gift_guides', 'Best Gift Guides'),
+        ('valentines_gifts', 'Valentine\'s Day Gifts'),
+        ('bestselling_gifts', 'Best-Selling Gifts'),
+        ('personalized_presents', 'Presents to Personalize'),
+    )
+    
+    title = models.CharField(max_length=200)
+    section_type = models.CharField(max_length=50, choices=SECTION_CHOICES)
+    description = models.TextField(blank=True, null=True)
+    image = models.ImageField(upload_to='gift_sections/', blank=True, null=True)
+    background_image = models.ImageField(upload_to='gift_sections/backgrounds/', blank=True, null=True)
+    
+    # Content for Best Gift Guides
+    guide_links = models.JSONField(default=list, blank=True, null=True, 
+        help_text="List of guide links in format: {'title': '...', 'url': '...'}")
+    
+    # Featured products for the section
+    featured_products = models.ManyToManyField(Product, blank=True, related_name='gift_guide_sections')
+    
+    # Filter categories
+    categories = models.ManyToManyField(Category, blank=True, related_name='gift_guide_sections')
+    
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+        verbose_name = "Gift Guide Section"
+        verbose_name_plural = "Gift Guide Sections"
+    
+    def __str__(self):
+        return f"{self.get_section_type_display()} - {self.title}"
+
+class GiftGuideProduct(models.Model):
+    """Featured products within gift guide sections with additional metadata"""
+    gift_section = models.ForeignKey(GiftGuideSection, on_delete=models.CASCADE, related_name='gift_products')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='gift_guide_entries')
+    
+    # Custom metadata for display
+    etsy_pick = models.BooleanField(default=False, help_text="Marked as Etsy's Pick")
+    custom_title = models.CharField(max_length=255, blank=True, null=True, help_text="Custom title for display")
+    custom_description = models.TextField(blank=True, null=True, help_text="Custom description")
+    display_order = models.PositiveIntegerField(default=0)
+    
+    # Additional display info
+    shop_name = models.CharField(max_length=100, blank=True, null=True)
+    badge_text = models.CharField(max_length=50, blank=True, null=True, help_text="e.g., '25% off', 'Free delivery'")
+    
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order', '-created']
+        unique_together = ['gift_section', 'product']
+    
+    def __str__(self):
+        return f"{self.gift_section.title} - {self.product.title}"

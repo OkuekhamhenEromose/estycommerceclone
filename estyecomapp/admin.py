@@ -254,11 +254,12 @@ class OrderItemInline(admin.TabularInline):
     fields = ['product', 'product_name', 'product_price', 'quantity', 'selected_size', 'subtotal']
 
 #::::: ORDER ADMIN :::::
+#::::: ORDER ADMIN :::::
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
         'order_number', 'user', 'order_by', 'amount', 
-        'order_status_display', 'payment_method', 'payment_complete', 'created'
+        'order_status', 'payment_method', 'payment_complete', 'created'
     ]
     list_filter = [
         'order_status', 'payment_method', 'payment_complete', 
@@ -305,25 +306,10 @@ class OrderAdmin(admin.ModelAdmin):
     )
     list_per_page = 50
     
-    def order_status_display(self, obj):
-        colors = {
-            'pending': 'orange',
-            'processing': 'blue',
-            'shipped': 'purple',
-            'delivered': 'green',
-            'cancelled': 'red',
-            'refunded': 'gray'
-        }
-        color = colors.get(obj.order_status, 'black')
-        return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            color, obj.get_order_status_display()
-        )
-    order_status_display.short_description = 'Status'
-    
     def amount_value_display(self, obj):
         return f'{obj.amount_value()} kobo'
     amount_value_display.short_description = 'Amount (Kobo)'
+
 
 #::::: ORDER ITEM ADMIN :::::
 @admin.register(OrderItem)

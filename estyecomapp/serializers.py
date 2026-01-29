@@ -316,3 +316,48 @@ class NavigationSerializer(serializers.Serializer):
     gifts_section = CategoryListSerializer(many=True)
     fashion_finds = CategoryListSerializer(many=True)
     home_favourites = CategoryListSerializer(many=True)
+
+# Add these serializers to the end of the file
+#::::: GIFT GUIDE PRODUCT SERIALIZER :::::
+class GiftGuideProductSerializer(serializers.ModelSerializer):
+    product = ProductListSerializer(read_only=True)
+    product_id = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(),
+        source='product',
+        write_only=True
+    )
+    
+    class Meta:
+        model = GiftGuideProduct
+        fields = '__all__'
+
+#::::: GIFT GUIDE SECTION SERIALIZER :::::
+class GiftGuideSectionSerializer(serializers.ModelSerializer):
+    featured_products = ProductListSerializer(many=True, read_only=True)
+    categories = CategoryListSerializer(many=True, read_only=True)
+    gift_products = GiftGuideProductSerializer(many=True, read_only=True)
+    section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
+    
+    class Meta:
+        model = GiftGuideSection
+        fields = '__all__'
+
+#::::: GIFTS PAGE DATA SERIALIZER :::::
+class GiftsPageDataSerializer(serializers.Serializer):
+    """Serializer for complete gifts page data"""
+    best_gift_guides = GiftGuideSectionSerializer(many=True)
+    valentines_gifts = GiftGuideSectionSerializer(many=True)
+    bestselling_gifts = GiftGuideSectionSerializer(many=True)
+    personalized_presents = GiftGuideSectionSerializer(many=True)
+    
+    # Additional gift categories
+    gift_occasions = CategoryListSerializer(many=True)
+    gift_interests = CategoryListSerializer(many=True)
+    gift_popular = CategoryListSerializer(many=True)
+    top_rated_products = ProductListSerializer(many=True)
+    
+    # SEO and metadata
+    page_title = serializers.CharField(default="Etsy's Best Gift Guides")
+    page_description = serializers.CharField(
+        default="Discover curated picks for every person and moment, straight from extraordinary small shops."
+    )

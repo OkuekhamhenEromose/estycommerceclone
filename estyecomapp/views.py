@@ -14,17 +14,25 @@ from .serializers import *
 from .models import *
 
 # :::::::::::::::::::  HOMEPAGE DATA VIEWS  :::::::::::::::::
-
 class HomepageDataView(APIView):
     """Get all data needed for homepage in a single optimized query"""
     def get(self, request):
         try:
+            data = {}
+            
             # Use select_related and prefetch_related for optimization
             sections = HomepageSection.objects.filter(
                 is_active=True
             ).order_by('order').prefetch_related(
-                'products', 'categories'
+                Prefetch('products', queryset=Product.objects.filter(is_available=True, in_stock__gt=0)),
+                'categories'
             )
+            
+            # Handle empty sections gracefully
+            if sections.exists():
+                data['homepage_sections'] = HomepageSectionSerializer(sections, many=True).data
+            else:
+                data['homepage_sections'] = []
             
             # Get deals products with discount percentage calculation
             deals_products = Product.objects.filter(
@@ -37,7 +45,7 @@ class HomepageDataView(APIView):
                     (F('price') - F('discount_price')) * 100 / F('price'),
                     output_field=DecimalField(max_digits=5, decimal_places=2)
                 )
-            ).filter(discount_percent__gt=15).order_by('-discount_percent')[:20]
+            ).filter(discount_percent__gt=0).order_by('-discount_percent')[:20]
             
             # Get featured products
             featured_products = Product.objects.filter(
@@ -53,14 +61,13 @@ class HomepageDataView(APIView):
                 in_stock__gt=0
             ).select_related('category', 'brand')[:20]
             
-            # Get new arrival products (created in last 7 days)
+            # Get new arrival products (created in last 30 days)
             from django.utils import timezone
-            week_ago = timezone.now() - timezone.timedelta(days=7)
+            month_ago = timezone.now() - timezone.timedelta(days=30)
             new_arrival_products = Product.objects.filter(
                 is_new_arrival=True,
                 is_available=True,
-                in_stock__gt=0,
-                created__gte=week_ago
+                in_stock__gt=0
             ).select_related('category', 'brand')[:20]
             
             # Get gift categories
@@ -89,8 +96,7 @@ class HomepageDataView(APIView):
             vintage_products = Product.objects.filter(
                 condition='vintage',
                 is_available=True,
-                in_stock__gt=0,
-                rating__gte=4.0
+                in_stock__gt=0
             ).select_related('category', 'brand').order_by('-rating')[:15]
             
             # Get featured interests categories
@@ -111,7 +117,10 @@ class HomepageDataView(APIView):
             top100_collection = Top100Gifts.objects.filter(is_active=True).first()
             if top100_collection:
                 if top100_collection.auto_populate:
-                    top100_collection.populate_products()
+                    try:
+                        top100_collection.populate_products()
+                    except:
+                        pass  # Skip if population fails
                 top100_products = top100_collection.get_random_selection(20)
             
             # Get main categories with subcategories and products
@@ -134,7 +143,7 @@ class HomepageDataView(APIView):
                 category_data['featured_products'] = ProductListSerializer(products, many=True).data
                 categories_with_details.append(category_data)
             
-            data = {
+            data.update({
                 'hero_banner': {
                     'message': 'Find something you love',
                     'image': None,
@@ -151,17 +160,45 @@ class HomepageDataView(APIView):
                 'todays_deals': ProductListSerializer(deals_products, many=True).data,
                 'editors_picks_vintage': ProductListSerializer(vintage_products, many=True).data,
                 'top100_gifts': ProductListSerializer(top100_products, many=True).data,
-                'homepage_sections': HomepageSectionSerializer(sections, many=True).data,
                 'featured_products': ProductListSerializer(featured_products, many=True).data,
                 'bestseller_products': ProductListSerializer(bestseller_products, many=True).data,
                 'new_arrival_products': ProductListSerializer(new_arrival_products, many=True).data,
-            }
+            })
             
             return Response(data, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # Return a more detailed error
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch homepage data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class TestHomepageView(APIView):
+    """Simple test endpoint to debug the homepage data"""
+    def get(self, request):
+        try:
+            # Test basic response
+            return Response({
+                'status': 'success',
+                'message': 'API is working',
+                'endpoint': '/homepage/',
+                'test_data': {
+                    'categories_count': Category.objects.count(),
+                    'products_count': Product.objects.count(),
+                    'sections_count': HomepageSection.objects.count()
+                }
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            
 class ComponentSpecificDataView(APIView):
     """Get specific data for each homepage component"""
     
@@ -1241,5 +1278,263 @@ class ProductSizeView(APIView):
             
             serializer = ProductSizeSerializer(sizes, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Add these views to the end of the file
+
+#::::: GIFTS PAGE VIEWS :::::
+class GiftsPageDataView(APIView):
+    """Get all data needed for the gifts page"""
+    def get(self, request):
+        try:
+            data = {}
+            
+            # Get all gift guide sections
+            best_gift_guides = GiftGuideSection.objects.filter(
+                section_type='best_gift_guides',
+                is_active=True
+            ).prefetch_related(
+                Prefetch('gift_products', queryset=GiftGuideProduct.objects.select_related('product')),
+                'featured_products',
+                'categories'
+            ).order_by('order')[:5]
+            
+            valentines_gifts = GiftGuideSection.objects.filter(
+                section_type='valentines_gifts',
+                is_active=True
+            ).prefetch_related(
+                Prefetch('gift_products', queryset=GiftGuideProduct.objects.select_related('product')),
+                'featured_products'
+            ).order_by('order')[:1]
+            
+            bestselling_gifts = GiftGuideSection.objects.filter(
+                section_type='bestselling_gifts',
+                is_active=True
+            ).prefetch_related(
+                Prefetch('gift_products', queryset=GiftGuideProduct.objects.select_related('product')),
+                'featured_products'
+            ).order_by('order')[:1]
+            
+            personalized_presents = GiftGuideSection.objects.filter(
+                section_type='personalized_presents',
+                is_active=True
+            ).prefetch_related(
+                Prefetch('gift_products', queryset=GiftGuideProduct.objects.select_related('product')),
+                'featured_products'
+            ).order_by('order')[:1]
+            
+            # Get gift categories
+            gift_occasions = Category.objects.filter(
+                category_type='gift_occasion',
+                is_active=True
+            ).order_by('order')[:8]
+            
+            gift_interests = Category.objects.filter(
+                category_type='gift_interest',
+                is_active=True
+            ).order_by('order')[:8]
+            
+            gift_popular = Category.objects.filter(
+                category_type='gift_popular',
+                is_active=True
+            ).order_by('order')[:8]
+            
+            # Get top rated gift products
+            top_rated_products = Product.objects.filter(
+                Q(category__category_type__in=['gifts', 'gift_occasion', 'gift_interest']) |
+                Q(tags__name__icontains='gift'),
+                is_available=True,
+                in_stock__gt=0,
+                rating__gte=4.0
+            ).distinct().order_by('-rating', '-review_count')[:20]
+            
+            # Auto-populate sections if they're empty
+            self._populate_section_if_empty(best_gift_guides, 'best_gift_guides')
+            self._populate_section_if_empty(valentines_gifts, 'valentines_gifts')
+            self._populate_section_if_empty(bestselling_gifts, 'bestselling_gifts')
+            self._populate_section_if_empty(personalized_presents, 'personalized_presents')
+            
+            # Re-fetch after potential population
+            best_gift_guides = GiftGuideSection.objects.filter(
+                section_type='best_gift_guides',
+                is_active=True
+            ).prefetch_related('gift_products').order_by('order')[:5]
+            
+            data.update({
+                'best_gift_guides': GiftGuideSectionSerializer(best_gift_guides, many=True).data,
+                'valentines_gifts': GiftGuideSectionSerializer(valentines_gifts, many=True).data,
+                'bestselling_gifts': GiftGuideSectionSerializer(bestselling_gifts, many=True).data,
+                'personalized_presents': GiftGuideSectionSerializer(personalized_presents, many=True).data,
+                'gift_occasions': CategoryListSerializer(gift_occasions, many=True).data,
+                'gift_interests': CategoryListSerializer(gift_interests, many=True).data,
+                'gift_popular': CategoryListSerializer(gift_popular, many=True).data,
+                'top_rated_products': ProductListSerializer(top_rated_products, many=True).data,
+                'page_title': "Etsy's Best Gift Guides",
+                'page_description': "Discover curated picks for every person and moment, straight from extraordinary small shops."
+            })
+            
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch gifts page data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _populate_section_if_empty(self, sections, section_type):
+        """Create default section if none exists"""
+        if not sections.exists():
+            if section_type == 'best_gift_guides':
+                # Create Best Gift Guides section
+                section = GiftGuideSection.objects.create(
+                    title="Etsy's Best Gift Guides",
+                    section_type=section_type,
+                    description="Discover curated picks for every person and moment, straight from extraordinary small shops.",
+                    guide_links=[
+                        {"title": "Best of Valentine's Day", "url": "/gifts/valentines-day"},
+                        {"title": "Top 100 Galentine's Picks", "url": "/gifts/galentines"},
+                        {"title": "Birthday Gifts", "url": "/gifts/birthday"},
+                        {"title": "Top 100 Aquarius Gifts", "url": "/gifts/aquarius"},
+                        {"title": "Milestone Birthdays", "url": "/gifts/milestone"},
+                        {"title": "Anniversary Gifts", "url": "/gifts/anniversary"},
+                        {"title": "Engagement Gifts", "url": "/gifts/engagement"},
+                        {"title": "Personalised Gifts", "url": "/gifts/personalized"},
+                        {"title": "Gifts for Him", "url": "/gifts/him"},
+                        {"title": "Gifts for Her", "url": "/gifts/her"},
+                        {"title": "Gifts for Kids", "url": "/gifts/kids"},
+                        {"title": "Gifts for Pets", "url": "/gifts/pets"}
+                    ]
+                )
+            elif section_type == 'valentines_gifts':
+                section = GiftGuideSection.objects.create(
+                    title="Valentine's Day Gifts",
+                    section_type=section_type,
+                    description="Find the perfect Valentine's Day gift"
+                )
+            elif section_type == 'bestselling_gifts':
+                section = GiftGuideSection.objects.create(
+                    title="Best-selling gifts they'll love",
+                    section_type=section_type,
+                    description="Top picks based on customer reviews and sales"
+                )
+            elif section_type == 'personalized_presents':
+                section = GiftGuideSection.objects.create(
+                    title="Presents you can personalise",
+                    section_type=section_type,
+                    description="Customizable gifts for that personal touch"
+                )
+
+class GiftGuideSectionDetailView(APIView):
+    """Get specific gift guide section with products"""
+    def get(self, request, section_type):
+        try:
+            section = get_object_or_404(
+                GiftGuideSection,
+                section_type=section_type,
+                is_active=True
+            )
+            
+            # Get products for the section
+            gift_products = section.gift_products.select_related('product').order_by('display_order')
+            
+            # If no custom products, use featured products
+            if not gift_products.exists() and section.featured_products.exists():
+                products = section.featured_products.filter(
+                    is_available=True,
+                    in_stock__gt=0
+                ).select_related('category', 'brand')[:20]
+            elif not gift_products.exists():
+                # Auto-generate products based on section type
+                if section_type == 'valentines_gifts':
+                    products = Product.objects.filter(
+                        Q(title__icontains='valentine') |
+                        Q(description__icontains='valentine') |
+                        Q(tags__name__icontains='valentine'),
+                        is_available=True,
+                        in_stock__gt=0
+                    )[:20]
+                elif section_type == 'bestselling_gifts':
+                    products = Product.objects.filter(
+                        is_bestseller=True,
+                        is_available=True,
+                        in_stock__gt=0
+                    ).order_by('-rating', '-review_count')[:20]
+                elif section_type == 'personalized_presents':
+                    products = Product.objects.filter(
+                        Q(title__icontains='personalized') |
+                        Q(description__icontains='personalized') |
+                        Q(tags__name__icontains='custom'),
+                        is_available=True,
+                        in_stock__gt=0
+                    )[:20]
+                else:
+                    products = Product.objects.filter(
+                        is_available=True,
+                        in_stock__gt=0
+                    ).order_by('-rating')[:20]
+            else:
+                products = [gp.product for gp in gift_products]
+            
+            return Response({
+                'section': GiftGuideSectionSerializer(section).data,
+                'products': ProductListSerializer(products, many=True).data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#::::: GIFT CATEGORY PRODUCTS VIEW :::::
+class GiftCategoryProductsView(APIView):
+    """Get products for specific gift category"""
+    pagination_class = StandardResultsSetPagination
+    
+    def get(self, request, category_slug):
+        try:
+            category = get_object_or_404(
+                Category.objects.filter(
+                    Q(category_type__in=['gifts', 'gift_occasion', 'gift_interest', 'gift_popular']) |
+                    Q(title__icontains='gift'),
+                    is_active=True
+                ),
+                slug=category_slug
+            )
+            
+            # Get all products from this category and subcategories
+            products = Product.objects.filter(
+                Q(category=category) | Q(category__parent=category),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct()
+            
+            # Apply filters
+            min_price = request.query_params.get('min_price', None)
+            max_price = request.query_params.get('max_price', None)
+            if min_price:
+                products = products.filter(price__gte=min_price)
+            if max_price:
+                products = products.filter(price__lte=max_price)
+            
+            # Sort
+            sort_by = request.query_params.get('sort', '-rating')
+            if sort_by == 'price':
+                products = products.order_by('price')
+            elif sort_by == '-price':
+                products = products.order_by('-price')
+            else:
+                products = products.order_by('-rating', '-review_count')
+            
+            # Pagination
+            paginator = self.pagination_class()
+            paginated_products = paginator.paginate_queryset(products, request)
+            
+            return Response({
+                'category': CategoryDetailSerializer(category).data,
+                'products': ProductListSerializer(paginated_products, many=True).data,
+                'total_products': products.count()
+            })
+            
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

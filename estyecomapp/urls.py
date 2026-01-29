@@ -61,4 +61,9 @@ urlpatterns = [
     
     # Homepage Sections
     path('homepage-sections/', views.HomepageSectionsView.as_view(), name='homepage-sections'),
+    # test
+    path('test-homepage/', views.TestHomepageView.as_view(), name='test-homepage'),
+    path('gifts-page/', views.GiftsPageDataView.as_view(), name='gifts-page'),
+    path('gifts-section/<str:section_type>/', views.GiftGuideSectionDetailView.as_view(), name='gift-guide-section'),
+    path('gift-category/<slug:category_slug>/products/', views.GiftCategoryProductsView.as_view(), name='gift-category-products'),
 ]
