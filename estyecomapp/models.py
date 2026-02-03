@@ -508,6 +508,7 @@ class HomepageSection(models.Model):
         ('home_favourites', 'Home Favourites'),
         ('gift_guides', 'Best Gift Guides'),
         ('valentines_gifts', 'Valentine\'s Day Gifts'),
+        ('best_of_valentine', "Best of Valentine's Day"),
         ('bestselling_gifts', 'Best-Selling Gifts'),
         ('personalized_presents', 'Presents to Personalize'),
     )
@@ -536,6 +537,7 @@ class GiftGuideSection(models.Model):
         ('best_gift_guides', 'Best Gift Guides'),
         ('valentines_gifts', 'Valentine\'s Day Gifts'),
         ('bestselling_gifts', 'Best-Selling Gifts'),
+        ('best_of_valentine',"Best of Valentine's Day"),
         ('personalized_presents', 'Presents to Personalize'),
     )
     
