@@ -1539,11 +1539,12 @@ class GiftCategoryProductsView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+# Add this view to the views.py file
 class BestOfValentineView(APIView):
-    """Get Best of Valentine's Day curated collection"""
+    """Get Best of Valentine's Day page data"""
     def get(self, request):
         try:
-            # Try to get the existing section
+            # Get the Best of Valentine's Day section
             valentine_section = GiftGuideSection.objects.filter(
                 section_type='best_of_valentine',
                 is_active=True
@@ -1554,17 +1555,32 @@ class BestOfValentineView(APIView):
                 valentine_section = GiftGuideSection.objects.create(
                     title="Best of Valentine's Day",
                     section_type='best_of_valentine',
-                    description="Picks you'll love for Valentine's Day",
+                    description="Picks you'll love",
                     is_active=True
                 )
             
-            # Get filter parameters from request
-            price_filter = request.query_params.get('price', None)
-            on_sale = request.query_params.get('on_sale', None) == 'true'
-            etsy_picks = request.query_params.get('etsy_picks', None) == 'true'
-            sent_from = request.query_params.get('sent_from', None)
+            # Get categories for the sidebar
+            valentine_categories = Category.objects.filter(
+                Q(title__icontains='valentine') |
+                Q(description__icontains='valentine') |
+                Q(slug__icontains='valentine'),
+                is_active=True
+            ).distinct()[:10]
             
-            # Base query for Valentine's Day products
+            # If no specific categories found, use default categories
+            if not valentine_categories.exists():
+                valentine_categories = Category.objects.filter(
+                    is_active=True,
+                    title__in=[
+                        "Valentine's Day Cards",
+                        "Valentine's Day Party Finds",
+                        "Personalised Jewellery",
+                        "Gifts for Him",
+                        "Gifts for Her"
+                    ]
+                )[:10]
+            
+            # Get products with Valentine's tags or in Valentine's categories
             products = Product.objects.filter(
                 Q(title__icontains='valentine') |
                 Q(description__icontains='valentine') |
@@ -1572,55 +1588,87 @@ class BestOfValentineView(APIView):
                 Q(category__title__icontains='valentine'),
                 is_available=True,
                 in_stock__gt=0
-            ).distinct()
+            ).distinct().select_related('category', 'brand')
             
-            # Apply price filters
-            if price_filter:
-                if price_filter == 'under_25':
+            # Apply filters from request
+            price_filter = request.query_params.get('price', 'any')
+            if price_filter != 'any':
+                if price_filter == 'under25':
                     products = products.filter(price__lt=25)
-                elif price_filter == '25_to_50':
+                elif price_filter == '25to50':
                     products = products.filter(price__gte=25, price__lte=50)
-                elif price_filter == '50_to_100':
+                elif price_filter == '50to100':
                     products = products.filter(price__gte=50, price__lte=100)
-                elif price_filter == 'over_100':
+                elif price_filter == 'over100':
                     products = products.filter(price__gt=100)
             
-            # Apply sale filter
+            on_sale = request.query_params.get('on_sale', 'false') == 'true'
             if on_sale:
                 products = products.filter(discount_price__isnull=False)
             
-            # Sort options
-            sort_by = request.query_params.get('sort', None)
-            if sort_by == 'price_low_to_high':
+            etsy_picks = request.query_params.get('etsy_picks', 'false') == 'true'
+            if etsy_picks:
+                # Get products marked as Etsy's Picks in GiftGuideProduct
+                etsy_pick_products = GiftGuideProduct.objects.filter(
+                    etsy_pick=True,
+                    product__in=products
+                ).values_list('product_id', flat=True)
+                products = products.filter(id__in=etsy_pick_products)
+            
+            # Sort products
+            sort_by = request.query_params.get('sort', '-rating')
+            if sort_by == 'price':
                 products = products.order_by('price')
-            elif sort_by == 'price_high_to_low':
+            elif sort_by == '-price':
                 products = products.order_by('-price')
-            elif sort_by == 'rating':
-                products = products.order_by('-rating', '-review_count')
+            elif sort_by == 'low_to_high':
+                products = products.order_by('price')
+            elif sort_by == 'high_to_low':
+                products = products.order_by('-price')
             else:
                 products = products.order_by('-rating', '-review_count')
             
-            # Get the categories for the sidebar
-            valentine_categories = Category.objects.filter(
-                Q(title__icontains='valentine') |
-                Q(description__icontains='valentine'),
-                is_active=True
-            ).distinct()[:10]
+            # Prepare products data with shop info
+            products_data = []
+            for product in products[:20]:
+                # Get shop name
+                shop_name = None
+                if product.seller and product.seller.user:
+                    shop_name = product.seller.user.username
+                
+                # Check if product is Etsy's Pick
+                gift_product = GiftGuideProduct.objects.filter(
+                    product=product,
+                    gift_section=valentine_section,
+                    etsy_pick=True
+                ).first()
+                
+                etsy_pick = gift_product.etsy_pick if gift_product else False
+                
+                products_data.append({
+                    'id': product.id,
+                    'title': product.title,
+                    'slug': product.slug,
+                    'short_description': product.short_description,
+                    'price': float(product.price),
+                    'discount_price': float(product.discount_price) if product.discount_price else None,
+                    'discount_percentage': product.discount_percentage,
+                    'final_price': float(product.final_price),
+                    'main': product.main.url if product.main else None,
+                    'rating': float(product.rating),
+                    'review_count': product.review_count,
+                    'is_featured': product.is_featured,
+                    'is_bestseller': product.is_bestseller,
+                    'is_deal': product.is_deal,
+                    'is_new_arrival': product.is_new_arrival,
+                    'condition': product.condition,
+                    'shop_name': shop_name,
+                    'etsy_pick': etsy_pick,
+                    'free_delivery': random.choice([True, False]),  # This would come from shipping info in a real app
+                    'has_video': random.choice([True, False]),  # This would come from media in a real app
+                })
             
-            # If no specific categories found, use generic Valentine's categories
-            if not valentine_categories.exists():
-                valentine_categories = Category.objects.filter(
-                    title__in=[
-                        "Valentine's Day Cards",
-                        "Valentine's Day Party Finds",
-                        "Personalised Jewellery",
-                        "Valentine's Gifts for Him",
-                        "Valentine's Gifts for Her"
-                    ],
-                    is_active=True
-                )[:10]
-            
-            # Get related searches
+            # Related searches
             related_searches = [
                 "custom embroidered sage green bows",
                 "ceramic pot mug",
@@ -1631,84 +1679,42 @@ class BestOfValentineView(APIView):
                 "love lounge"
             ]
             
-            # Create gift products if section is empty
-            if not valentine_section.gift_products.exists():
-                # Add some featured products to the section
-                featured_products = products[:20]
-                for idx, product in enumerate(featured_products):
-                    GiftGuideProduct.objects.get_or_create(
-                        gift_section=valentine_section,
-                        product=product,
-                        defaults={
-                            'display_order': idx,
-                            'etsy_pick': random.choice([True, False]),  # Randomly mark as Etsy's Pick
-                            'shop_name': product.seller.user.username if product.seller else "Unknown Shop",
-                            'badge_text': "Free delivery" if random.choice([True, False]) else None
-                        }
-                    )
-            
-            # Get section products with their metadata
-            section_products = valentine_section.gift_products.select_related(
-                'product'
-            ).order_by('display_order')
-            
-            # If no section products, use the filtered products
-            if not section_products.exists():
-                products_list = products[:20]
-                section_products_data = ProductListSerializer(products_list, many=True).data
-            else:
-                products_list = [gp.product for gp in section_products]
-                section_products_data = []
-                for gp in section_products:
-                    product_data = ProductListSerializer(gp.product).data
-                    product_data['etsy_pick'] = gp.etsy_pick
-                    product_data['shop_name'] = gp.shop_name
-                    product_data['badge_text'] = gp.badge_text
-                    product_data['custom_title'] = gp.custom_title
-                    section_products_data.append(product_data)
-            
             response_data = {
                 'section': {
                     'id': valentine_section.id,
                     'title': valentine_section.title,
                     'description': valentine_section.description,
                     'section_type': valentine_section.section_type,
-                    'section_type_display': valentine_section.get_section_type_display(),
                 },
                 'categories': CategoryListSerializer(valentine_categories, many=True).data,
-                'products': section_products_data,
+                'products': products_data,
+                'related_searches': related_searches,
                 'filters': {
                     'price_options': [
                         {'value': 'any', 'label': 'Any price'},
-                        {'value': 'under_25', 'label': 'Under $25'},
-                        {'value': '25_to_50', 'label': '$25 to $50'},
-                        {'value': '50_to_100', 'label': '$50 to $100'},
-                        {'value': 'over_100', 'label': 'Over $100'},
-                        {'value': 'custom', 'label': 'Custom'}
+                        {'value': 'under25', 'label': 'Under $25'},
+                        {'value': '25to50', 'label': '$25 to $50'},
+                        {'value': '50to100', 'label': '$50 to $100'},
+                        {'value': 'over100', 'label': 'Over $100'},
                     ],
                     'sort_options': [
                         {'value': 'relevance', 'label': 'Relevance'},
-                        {'value': 'price_low_to_high', 'label': 'Price: Low to High'},
-                        {'value': 'price_high_to_low', 'label': 'Price: High to Low'},
-                        {'value': 'rating', 'label': 'Top Rated'}
+                        {'value': 'low_to_high', 'label': 'Price: Low to High'},
+                        {'value': 'high_to_low', 'label': 'Price: High to Low'},
+                        {'value': 'top_rated', 'label': 'Top Rated'},
                     ],
                     'shipping_options': [
                         {'value': 'anywhere', 'label': 'Anywhere'},
                         {'value': 'US', 'label': 'United States'},
-                        {'value': 'UK', 'label': 'United Kingdom'},
                         {'value': 'AU', 'label': 'Australia'},
                         {'value': 'CA', 'label': 'Canada'},
-                        {'value': 'EU', 'label': 'European Union'}
+                        {'value': 'FR', 'label': 'France'},
                     ]
                 },
-                'related_searches': related_searches,
-                'total_products': len(products_list),
                 'current_filters': {
                     'price': price_filter,
                     'on_sale': on_sale,
                     'etsy_picks': etsy_picks,
-                    'sent_from': sent_from,
-                    'sort': sort_by
                 }
             }
             
@@ -1720,5 +1726,8 @@ class BestOfValentineView(APIView):
             return Response({
                 'error': str(e),
                 'detail': error_detail,
-                'message': 'Failed to fetch Valentine\'s Day data'
+                'message': 'Failed to fetch Best of Valentine\'s Day data'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+        
