@@ -12,6 +12,7 @@ from django.conf import settings
 import requests
 from .serializers import *
 from .models import *
+import random
 
 # :::::::::::::::::::  HOMEPAGE DATA VIEWS  :::::::::::::::::
 class HomepageDataView(APIView):
@@ -1730,4 +1731,3 @@ class BestOfValentineView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 
-        
