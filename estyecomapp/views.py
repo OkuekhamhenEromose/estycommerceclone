@@ -13,6 +13,7 @@ import requests
 from .serializers import *
 from .models import *
 import random
+from django.utils.text import slugify
 
 # :::::::::::::::::::  HOMEPAGE DATA VIEWS  :::::::::::::::::
 class HomepageDataView(APIView):
@@ -1729,5 +1730,220 @@ class BestOfValentineView(APIView):
                 'detail': error_detail,
                 'message': 'Failed to fetch Best of Valentine\'s Day data'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 
+
+# ::::: HOME FAVOURITES VIEWS :::::
+class HomeFavouritesView(APIView):
+    """Get Home Favourites page data"""
+    def get(self, request):
+        try:
+            # Get Home Favourites section
+            home_favourites_section = HomepageSection.objects.filter(
+                section_type='home_favourites',
+                is_active=True
+            ).first()
+            
+            # If no section exists, create a default one
+            if not home_favourites_section:
+                home_favourites_section = HomepageSection.objects.create(
+                    title="Etsy's Guide to Home",
+                    section_type='home_favourites',
+                    description="Discover original wall art, comfy bedding, unique lighting, and more from small shops.",
+                    is_active=True,
+                    order=0
+                )
+            
+            # Get Home Favourites categories
+            home_categories = Category.objects.filter(
+                category_type='home_favourites',
+                is_active=True
+            )[:6]
+            
+            # If no categories found, create default ones
+            if not home_categories.exists():
+                default_home_categories = [
+                    "Artisanal Dinnerware",
+                    "Outdoor Furniture & Decor",
+                    "Garden Decor & Supplies",
+                    "Personalised Home Decor",
+                    "Candles & Home Fragrance",
+                    "Vintage Home Decor"
+                ]
+                
+                for i, title in enumerate(default_home_categories):
+                    category = Category.objects.create(
+                        title=title,
+                        slug=slugify(title),
+                        category_type='home_favourites',
+                        image=f'categories/home/{slugify(title)}.jpg',
+                        order=i,
+                        is_active=True
+                    )
+                    home_categories = Category.objects.filter(category_type='home_favourites')
+            
+            # Get products for Home Favourites sections
+            # Spring-ready linens products
+            spring_linens_products = Product.objects.filter(
+                Q(title__icontains='linen') |
+                Q(description__icontains='linen') |
+                Q(category__title__icontains='linen'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct()[:8]
+            
+            # Reorganizing products
+            reorganizing_products = Product.objects.filter(
+                Q(title__icontains='organizer') |
+                Q(title__icontains='storage') |
+                Q(title__icontains='organize') |
+                Q(description__icontains='organizer') |
+                Q(description__icontains='storage'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct()[:8]
+            
+            # Small shops data
+            shops_data = [
+                {
+                    "name": "OliveLaneInteriors",
+                    "rating": 5,
+                    "reviewCount": "100",
+                    "images": self._get_shop_images(["ceramic", "vintage", "macrame", "crochet"])
+                },
+                {
+                    "name": "BrooxFurniture",
+                    "rating": 5,
+                    "reviewCount": "116",
+                    "images": self._get_shop_images(["watch", "pillow", "linen", "vintage"])
+                },
+                {
+                    "name": "ForestlandLinen",
+                    "rating": 5,
+                    "reviewCount": "4,977",
+                    "images": self._get_shop_images(["crochet", "linen", "pillow", "macrame"])
+                },
+                {
+                    "name": "MDTMobilier",
+                    "rating": 3,
+                    "reviewCount": "70",
+                    "images": self._get_shop_images(["vintage", "watch", "ceramic", "vintage"])
+                }
+            ]
+            
+            # Discover more categories
+            discover_categories = [
+                {
+                    "title": "Special Starts on Etsy",
+                    "image": self._get_category_image("special"),
+                    "slug": "special-starts"
+                },
+                {
+                    "title": "Global Seller Spotlight",
+                    "image": self._get_category_image("global"),
+                    "slug": "global-seller"
+                },
+                {
+                    "title": "Vintage Home Decor",
+                    "image": self._get_category_image("vintage"),
+                    "slug": "vintage-home-decor"
+                },
+                {
+                    "title": "Explore Unique Wall Art",
+                    "image": self._get_category_image("wall-art"),
+                    "slug": "unique-wall-art"
+                }
+            ]
+            
+            response_data = {
+                "section": {
+                    "id": home_favourites_section.id,
+                    "title": home_favourites_section.title,
+                    "description": home_favourites_section.description,
+                    "section_type": home_favourites_section.section_type,
+                },
+                "hero_categories": [
+                    {
+                        "title": "Home Decor",
+                        "image": self._get_category_image("home-decor"),
+                        "slug": "home-decor"
+                    },
+                    {
+                        "title": "Kitchen & Dining",
+                        "image": self._get_category_image("kitchen"),
+                        "slug": "kitchen-dining"
+                    },
+                    {
+                        "title": "Furniture",
+                        "image": self._get_category_image("furniture"),
+                        "slug": "furniture"
+                    },
+                    {
+                        "title": "Vintage Rugs",
+                        "image": self._get_category_image("rugs"),
+                        "slug": "vintage-rugs"
+                    },
+                    {
+                        "title": "Lighting",
+                        "image": self._get_category_image("lighting"),
+                        "slug": "lighting"
+                    },
+                    {
+                        "title": "Bedding",
+                        "image": self._get_category_image("bedding"),
+                        "slug": "bedding"
+                    }
+                ],
+                "home_categories": CategoryListSerializer(home_categories, many=True).data,
+                "small_shops": shops_data,
+                "spring_linens_products": ProductListSerializer(spring_linens_products, many=True).data,
+                "reorganizing_products": ProductListSerializer(reorganizing_products, many=True).data,
+                "discover_categories": discover_categories,
+                "filters": {
+                    "price_options": [
+                        {"value": "any", "label": "Any price"},
+                        {"value": "under25", "label": "Under USD 25"},
+                        {"value": "25to50", "label": "USD 25 to USD 50"},
+                        {"value": "50to100", "label": "USD 50 to USD 100"},
+                        {"value": "over100", "label": "Over USD 100"},
+                        {"value": "custom", "label": "Custom"}
+                    ]
+                }
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch Home Favourites data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _get_shop_images(self, keywords):
+        """Get product images for shop display"""
+        images = []
+        for keyword in keywords:
+            product = Product.objects.filter(
+                Q(title__icontains=keyword) |
+                Q(description__icontains=keyword),
+                is_available=True,
+                main__isnull=False
+            ).first()
+            if product:
+                images.append(product.main.url)
+            else:
+                # Fallback to placeholder
+                images.append("/media/categories/placeholder.jpg")
+        return images
+    
+    def _get_category_image(self, category_name):
+        """Get image for a category"""
+        category = Category.objects.filter(
+            title__icontains=category_name,
+            image__isnull=False
+        ).first()
+        if category:
+            return category.image.url
+        return "/media/categories/placeholder.jpg"

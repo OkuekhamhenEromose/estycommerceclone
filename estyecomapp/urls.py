@@ -67,4 +67,5 @@ urlpatterns = [
     path('gifts-section/<str:section_type>/', views.GiftGuideSectionDetailView.as_view(), name='gift-guide-section'),
     path('gift-category/<slug:category_slug>/products/', views.GiftCategoryProductsView.as_view(), name='gift-category-products'),
     path('best-of-valentine/', views.BestOfValentineView.as_view(), name='best-of-valentine'),
+    path('home-favourites/', views.HomeFavouritesView.as_view(), name='home-favourites')
 ]
