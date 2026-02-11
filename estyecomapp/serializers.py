@@ -361,3 +361,77 @@ class GiftsPageDataSerializer(serializers.Serializer):
     page_description = serializers.CharField(
         default="Discover curated picks for every person and moment, straight from extraordinary small shops."
     )
+
+#::::: FASHION SHOP SERIALIZER :::::
+class FashionShopSerializer(serializers.ModelSerializer):
+    featured_products = ProductListSerializer(many=True, read_only=True)
+    featured_products_preview = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FashionShop
+        fields = '__all__'
+    
+    def get_featured_products_preview(self, obj):
+        """Get first 4 featured products for preview"""
+        products = obj.featured_products.filter(is_available=True, in_stock__gt=0)[:4]
+        return ProductListSerializer(products, many=True).data
+
+#::::: FASHION PROMO CARD SERIALIZER :::::
+class FashionPromoCardSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionPromoCard
+        fields = '__all__'
+
+#::::: FASHION TRENDING SERIALIZER :::::
+class FashionTrendingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionTrending
+        fields = '__all__'
+
+#::::: FASHION DISCOVER SERIALIZER :::::
+class FashionDiscoverSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionDiscover
+        fields = '__all__'
+
+#::::: FASHION FINDS DATA SERIALIZER :::::
+class FashionFindsDataSerializer(serializers.Serializer):
+    """Serializer for complete Fashion Finds page data"""
+    
+    # Hero section
+    hero_title = serializers.CharField(default="Etsy's Guide to Fashion")
+    hero_description = serializers.CharField(
+        default="From custom clothing to timeless jewellery, everything you need to upgrade your wardrobe."
+    )
+    
+    # Categories for the hero section
+    hero_categories = CategoryListSerializer(many=True)
+    
+    # Shops we love
+    shops_we_love = FashionShopSerializer(many=True)
+    
+    # Product sections
+    personalised_clothes_products = ProductListSerializer(many=True)
+    unique_handbags_products = ProductListSerializer(many=True)
+    personalised_jewellery_products = ProductListSerializer(many=True)
+    
+    # Promo cards
+    promo_cards = FashionPromoCardSerializer(many=True)
+    
+    # Trending section
+    trending = FashionTrendingSerializer(many=True)
+    
+    # Discover more
+    discover_more = FashionDiscoverSerializer(many=True)
+    
+    # Filters
+    filters = serializers.DictField(default={
+        'price_options': [
+            {'value': 'any', 'label': 'Any price'},
+            {'value': 'under25', 'label': 'Under USD 25'},
+            {'value': '25to50', 'label': 'USD 25 to USD 50'},
+            {'value': '50to100', 'label': 'USD 50 to USD 100'},
+            {'value': 'over100', 'label': 'Over USD 100'},
+            {'value': 'custom', 'label': 'Custom'}
+        ]
+    })

@@ -1947,3 +1947,265 @@ class HomeFavouritesView(APIView):
         if category:
             return category.image.url
         return "/media/categories/placeholder.jpg"
+
+#::::: FASHION FINDS VIEW :::::
+class FashionFindsView(APIView):
+    """Get all data needed for Fashion Finds page"""
+    
+    def get(self, request):
+        try:
+            # Get Fashion Finds section
+            fashion_section = HomepageSection.objects.filter(
+                section_type='fashion_finds',
+                is_active=True
+            ).first()
+            
+            # If no section exists, create a default one
+            if not fashion_section:
+                fashion_section = HomepageSection.objects.create(
+                    title="Fashion Finds",
+                    section_type='fashion_finds',
+                    description="Discover fashion items from small shops",
+                    is_active=True,
+                    order=0
+                )
+            
+            # Get Fashion Finds categories (hero section)
+            fashion_categories = Category.objects.filter(
+                Q(category_type='fashion_finds') |
+                Q(parent_category__name__icontains='fashion') |
+                Q(title__icontains='clothing') |
+                Q(title__icontains='wear'),
+                is_active=True
+            ).distinct()[:12]
+            
+            # If no specific categories found, create/use default ones
+            if not fashion_categories.exists():
+                default_categories = [
+                    "Women's Clothing",
+                    "Men's Clothing", 
+                    "Kids & Baby Clothing",
+                    "Free Delivery: Cosy Knits",
+                    "Personalised Tees & Sweatshirts",
+                    "Jackets & Coats",
+                    "Hats & Beanies",
+                    "Handbags",
+                    "Bag Charms & Keyrings",
+                    "Hair Accessories",
+                    "Lounge & Sleepwear",
+                    "Travel Must-Haves"
+                ]
+                
+                for i, title in enumerate(default_categories):
+                    category, created = Category.objects.get_or_create(
+                        title=title,
+                        defaults={
+                            'slug': slugify(title),
+                            'category_type': 'fashion_finds',
+                            'image': f'categories/fashion/{slugify(title)}.jpg',
+                            'order': i,
+                            'is_active': True
+                        }
+                    )
+                fashion_categories = Category.objects.filter(
+                    title__in=default_categories,
+                    is_active=True
+                ).order_by('order')[:12]
+            
+            # Get Fashion Shops We Love
+            fashion_shops = FashionShop.objects.filter(
+                is_featured=True
+            ).prefetch_related('featured_products').order_by('order')[:4]
+            
+            # If no shops exist, create default ones
+            if not fashion_shops.exists():
+                default_shops = [
+                    {
+                        'name': 'SbriStudio',
+                        'display_name': 'Sbristudio',
+                        'rating': 5,
+                        'review_count': 2841
+                    },
+                    {
+                        'name': 'Plexida',
+                        'display_name': 'Plexida',
+                        'rating': 5,
+                        'review_count': 2092
+                    },
+                    {
+                        'name': 'GemBlue',
+                        'display_name': 'GemBlue',
+                        'rating': 5,
+                        'review_count': 2473
+                    },
+                    {
+                        'name': 'LetterParty',
+                        'display_name': 'LetterParty',
+                        'rating': 5,
+                        'review_count': 273
+                    }
+                ]
+                
+                for i, shop_data in enumerate(default_shops):
+                    shop = FashionShop.objects.create(
+                        name=shop_data['name'],
+                        slug=slugify(shop_data['name']),
+                        display_name=shop_data['display_name'],
+                        rating=shop_data['rating'],
+                        review_count=shop_data['review_count'],
+                        order=i,
+                        is_featured=True
+                    )
+                    
+                    # Add some random products to the shop
+                    products = Product.objects.filter(
+                        is_available=True,
+                        in_stock__gt=0
+                    ).order_by('?')[:4]
+                    shop.featured_products.set(products)
+                
+                fashion_shops = FashionShop.objects.filter(is_featured=True).order_by('order')[:4]
+            
+            # Get products for different sections
+            # Personalised clothes products
+            personalised_clothes = Product.objects.filter(
+                Q(title__icontains='personalised') |
+                Q(title__icontains='custom') |
+                Q(title__icontains='embroidered') |
+                Q(description__icontains='personalised') |
+                Q(tags__name__icontains='custom'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct().order_by('-rating', '-review_count')[:20]
+            
+            # Unique handbags products
+            unique_handbags = Product.objects.filter(
+                Q(title__icontains='handbag') |
+                Q(title__icontains='purse') |
+                Q(title__icontains='tote') |
+                Q(title__icontains='bag') |
+                Q(category__title__icontains='bag'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct().order_by('-rating', '-review_count')[:20]
+            
+            # Personalised jewellery products
+            personalised_jewellery = Product.objects.filter(
+                Q(title__icontains='jewellery') |
+                Q(title__icontains='jewelry') |
+                Q(title__icontains='necklace') |
+                Q(title__icontains='ring') |
+                Q(title__icontains='bracelet') |
+                Q(category__title__icontains='jewellery'),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct().order_by('-rating', '-review_count')[:20]
+            
+            # Get Promo Cards
+            promo_cards = FashionPromoCard.objects.filter(
+                is_active=True
+            ).order_by('order')[:2]
+            
+            # If no promo cards exist, create default ones
+            if not promo_cards.exists():
+                promo_cards_data = [
+                    {
+                        'title': 'Elevate your everyday jewellery',
+                        'button_text': 'Shop now',
+                        'button_url': '/jewellery'
+                    },
+                    {
+                        'title': 'The Charm Shop',
+                        'button_text': 'Shop now',
+                        'button_url': '/charms'
+                    }
+                ]
+                
+                for i, card_data in enumerate(promo_cards_data):
+                    FashionPromoCard.objects.create(
+                        title=card_data['title'],
+                        button_text=card_data['button_text'],
+                        button_url=card_data['button_url'],
+                        order=i,
+                        is_active=True,
+                        image=f'fashion_promo/card_{i+1}.jpg'
+                    )
+                
+                promo_cards = FashionPromoCard.objects.filter(is_active=True).order_by('order')[:2]
+            
+            # Get Trending section
+            trending = FashionTrending.objects.filter(
+                is_active=True
+            )[:1]
+            
+            # If no trending exists, create default
+            if not trending.exists():
+                FashionTrending.objects.create(
+                    title="Trending now: Burgundy hues",
+                    description="Jump into one of our favourite colours for winter. The deep shade will bring a moody vibe to any outfit as we move into chillier temperatures.",
+                    button_text="Try it out",
+                    button_url="/trending/burgundy",
+                    is_active=True,
+                    image='fashion_trending/burgundy.jpg'
+                )
+                trending = FashionTrending.objects.filter(is_active=True)[:1]
+            
+            # Get Discover More section
+            discover_more = FashionDiscover.objects.filter(
+                is_active=True
+            ).order_by('order')[:4]
+            
+            # If no discover more exists, create default
+            if not discover_more.exists():
+                discover_data = [
+                    {'title': 'Special Starts on Etsy', 'url': '/special-starts'},
+                    {'title': 'The Linen Shop', 'url': '/linen-shop'},
+                    {'title': 'The Personalisation Shop', 'url': '/personalisation-shop'},
+                    {'title': "Etsy's Guide to Vintage", 'url': '/vintage-guide'}
+                ]
+                
+                for i, item in enumerate(discover_data):
+                    FashionDiscover.objects.create(
+                        title=item['title'],
+                        url=item['url'],
+                        order=i,
+                        is_active=True,
+                        image=f'fashion_discover/discover_{i+1}.jpg'
+                    )
+                
+                discover_more = FashionDiscover.objects.filter(is_active=True).order_by('order')[:4]
+            
+            # Prepare response data
+            response_data = {
+                'hero_title': fashion_section.title,
+                'hero_description': fashion_section.description,
+                'hero_categories': CategoryListSerializer(fashion_categories, many=True).data,
+                'shops_we_love': FashionShopSerializer(fashion_shops, many=True).data,
+                'personalised_clothes_products': ProductListSerializer(personalised_clothes, many=True).data,
+                'unique_handbags_products': ProductListSerializer(unique_handbags, many=True).data,
+                'personalised_jewellery_products': ProductListSerializer(personalised_jewellery, many=True).data,
+                'promo_cards': FashionPromoCardSerializer(promo_cards, many=True).data,
+                'trending': FashionTrendingSerializer(trending, many=True).data,
+                'discover_more': FashionDiscoverSerializer(discover_more, many=True).data,
+                'filters': {
+                    'price_options': [
+                        {'value': 'any', 'label': 'Any price'},
+                        {'value': 'under25', 'label': 'Under USD 25'},
+                        {'value': '25to50', 'label': 'USD 25 to USD 50'},
+                        {'value': '50to100', 'label': 'USD 50 to USD 100'},
+                        {'value': 'over100', 'label': 'Over USD 100'},
+                        {'value': 'custom', 'label': 'Custom'}
+                    ]
+                }
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch Fashion Finds data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

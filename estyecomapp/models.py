@@ -511,6 +511,10 @@ class HomepageSection(models.Model):
         ('best_of_valentine', "Best of Valentine's Day"),
         ('bestselling_gifts', 'Best-Selling Gifts'),
         ('personalized_presents', 'Presents to Personalize'),
+        ('fashion_trending', 'Fashion Trending Now'),
+        ('fashion_promo', 'Fashion Promo Cards'),
+        ('fashion_shops', 'Fashion Shops We Love'),
+        ('fashion_discover', 'Fashion Discover More'),
     )
     
     title = models.CharField(max_length=200)
@@ -594,3 +598,91 @@ class GiftGuideProduct(models.Model):
     
     def __str__(self):
         return f"{self.gift_section.title} - {self.product.title}"
+    
+class FashionShop(models.Model):
+    """Small shops for Fashion Finds section"""
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True)
+    rating = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(5)]
+    )
+    review_count = models.PositiveIntegerField(default=0)
+    display_name = models.CharField(max_length=100, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    logo = models.ImageField(upload_to='fashion_shops/', blank=True, null=True)
+    cover_image = models.ImageField(upload_to='fashion_shops/covers/', blank=True, null=True)
+    
+    # Products to display for this shop
+    featured_products = models.ManyToManyField(Product, blank=True, related_name='fashion_shops')
+    
+    # Display settings
+    is_featured = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0)
+    
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'name']
+    
+    def __str__(self):
+        return self.name
+
+# Add a model for Fashion Promo Cards
+class FashionPromoCard(models.Model):
+    """Promotional cards for Fashion Finds"""
+    title = models.CharField(max_length=200)
+    subtitle = models.CharField(max_length=200, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    image = models.ImageField(upload_to='fashion_promo/')
+    button_text = models.CharField(max_length=50, default="Shop now")
+    button_url = models.CharField(max_length=500)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+    
+    def __str__(self):
+        return self.title
+
+# Add a model for Fashion Trending
+class FashionTrending(models.Model):
+    """Trending section for Fashion Finds"""
+    title = models.CharField(max_length=200)
+    subtitle = models.CharField(max_length=200, blank=True, null=True)
+    description = models.TextField()
+    image = models.ImageField(upload_to='fashion_trending/')
+    button_text = models.CharField(max_length=50, default="Try it out")
+    button_url = models.CharField(max_length=500)
+    is_active = models.BooleanField(default=True)
+    
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return self.title
+
+# Add a model for Fashion Discover More
+class FashionDiscover(models.Model):
+    """Discover more section for Fashion Finds"""
+    title = models.CharField(max_length=200)
+    image = models.ImageField(upload_to='fashion_discover/')
+    url = models.CharField(max_length=500)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+    
+    def __str__(self):
+        return self.title
