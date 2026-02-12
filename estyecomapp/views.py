@@ -2554,3 +2554,192 @@ class PopularGiftsByCategoryView(APIView):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+#::::: GIFT TEASER VIEWS :::::
+
+class GiftTeaserDataView(APIView):
+    """Get all gift teaser and gift card data"""
+    
+    def get(self, request):
+        try:
+            # Get active gift teaser banner
+            teaser_banner = GiftTeaserBanner.objects.filter(
+                is_active=True
+            ).prefetch_related('features').order_by('order').first()
+            
+            if not teaser_banner:
+                teaser_banner = self._create_default_teaser_banner()
+            
+            # Get active gift card banner
+            gift_card_banner = GiftCardBanner.objects.filter(
+                is_active=True
+            ).order_by('order').first()
+            
+            if not gift_card_banner:
+                gift_card_banner = self._create_default_gift_card_banner()
+            
+            # Get about section
+            about_section = AboutGiftFinder.objects.filter(
+                is_active=True
+            ).first()
+            
+            if not about_section:
+                about_section = self._create_default_about_section()
+            
+            # Get a featured product for the checkout preview
+            featured_product = Product.objects.filter(
+                is_available=True,
+                in_stock__gt=0,
+                is_featured=True
+            ).order_by('-rating').first()
+            
+            if not featured_product:
+                featured_product = Product.objects.filter(
+                    is_available=True,
+                    in_stock__gt=0
+                ).order_by('-rating').first()
+            
+            response_data = {
+                'teaser_banner': GiftTeaserBannerSerializer(teaser_banner).data if teaser_banner else None,
+                'gift_card_banner': GiftCardBannerSerializer(gift_card_banner).data if gift_card_banner else None,
+                'about_section': AboutGiftFinderSerializer(about_section).data if about_section else None,
+                'featured_product': ProductListSerializer(featured_product).data if featured_product else None
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch gift teaser data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _create_default_teaser_banner(self):
+        """Create default gift teaser banner"""
+        banner = GiftTeaserBanner.objects.create(
+            title="Make any gift extra-special with a gift teaser – it's *FREE!",
+            badge_text="✨ New",
+            description="",
+            order=1,
+            is_active=True
+        )
+        
+        # Add features
+        features = [
+            {"icon": "ShoppingCart", "text": "Mark as a gift to send a gift teaser! *It's free with purchase", "order": 1},
+            {"icon": "Gift", "text": "Send a special note, tracking info, and even a sneak peek", "order": 2},
+            {"icon": "Send", "text": "Share it instantly... even on the way to the party!", "order": 3}
+        ]
+        
+        for feature in features:
+            GiftTeaserFeature.objects.create(
+                banner=banner,
+                icon=feature["icon"],
+                text=feature["text"],
+                order=feature["order"]
+            )
+        
+        return banner
+    
+    def _create_default_gift_card_banner(self):
+        """Create default gift card banner"""
+        return GiftCardBanner.objects.create(
+            title="Shop Etsy gift cards",
+            description="Get them something one-of-a-kind in minutes, no guesswork needed.",
+            button_text="Pick a design",
+            button_url="/gift-cards",
+            gradient_from="from-yellow-300",
+            gradient_via="via-orange-400",
+            gradient_to="to-green-500",
+            order=1,
+            is_active=True
+        )
+    
+    def _create_default_about_section(self):
+        """Create default about section"""
+        return AboutGiftFinder.objects.create(
+            title="If you need gift ideas for anybody – and we mean ANYBODY – in your life, you've come to the right place.",
+            description="By answering a few simple questions, this fun gift finder will suggest the perfect presents based on the occasion, the person's interests, and more. Etsy takes the stress out of finding special gifts. From anniversary gifts to birthday gifts, and even gifts for the people who have everything, use Etsy to take the guesswork out of giving.",
+            icon="Gift",
+            button_text_more="More",
+            button_text_less="Less",
+            is_active=True
+        )
+
+class MarkOrderAsGiftView(APIView):
+    """Mark a cart item as a gift"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            cart_id = request.session.get('cart_id', None)
+            
+            if not cart_id:
+                return Response({
+                    'error': 'No active cart found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            cart = get_object_or_404(Cart, id=cart_id)
+            
+            # Get cart product
+            cart_product_id = request.data.get('cart_product_id')
+            if not cart_product_id:
+                return Response({
+                    'error': 'Cart product ID is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            cart_product = get_object_or_404(CartProduct, id=cart_product_id, cart=cart)
+            
+            # Mark as gift (store in session or cart metadata)
+            if not hasattr(cart, 'metadata') or cart.metadata is None:
+                cart.metadata = {}
+            
+            if 'gift_items' not in cart.metadata:
+                cart.metadata['gift_items'] = []
+            
+            if cart_product.id not in cart.metadata['gift_items']:
+                cart.metadata['gift_items'].append(cart_product.id)
+                cart.save()
+            
+            return Response({
+                'message': 'Item marked as gift',
+                'cart_product_id': cart_product.id
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def delete(self, request):
+        """Unmark an item as gift"""
+        try:
+            cart_id = request.session.get('cart_id', None)
+            
+            if not cart_id:
+                return Response({
+                    'error': 'No active cart found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            cart = get_object_or_404(Cart, id=cart_id)
+            
+            cart_product_id = request.data.get('cart_product_id')
+            if not cart_product_id:
+                return Response({
+                    'error': 'Cart product ID is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if hasattr(cart, 'metadata') and cart.metadata and 'gift_items' in cart.metadata:
+                if cart_product_id in cart.metadata['gift_items']:
+                    cart.metadata['gift_items'].remove(cart_product_id)
+                    cart.save()
+            
+            return Response({
+                'message': 'Item unmarked as gift',
+                'cart_product_id': cart_product_id
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

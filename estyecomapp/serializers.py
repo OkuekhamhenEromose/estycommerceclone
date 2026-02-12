@@ -546,3 +546,27 @@ class GiftFinderDataSerializer(serializers.Serializer):
             in_stock__gt=0
         ).order_by('-rating', '-review_count')[:20]
         return ProductListSerializer(products, many=True).data
+    
+#::::: GIFT TEASER SERIALIZERS :::::
+
+class GiftTeaserFeatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftTeaserFeature
+        fields = ['id', 'icon', 'text', 'order']
+
+class GiftTeaserBannerSerializer(serializers.ModelSerializer):
+    features = GiftTeaserFeatureSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = GiftTeaserBanner
+        fields = '__all__'
+
+class GiftCardBannerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftCardBanner
+        fields = '__all__'
+
+class AboutGiftFinderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AboutGiftFinder
+        fields = '__all__'

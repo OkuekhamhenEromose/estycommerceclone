@@ -73,4 +73,6 @@ urlpatterns = [
     path('gift-finder/', views.GiftFinderDataView.as_view(), name='gift-finder'),
     path('gift-finder/collections/', views.GiftCollectionByInterestView.as_view(), name='gift-collections'),
     path('gift-finder/popular-gifts/', views.PopularGiftsByCategoryView.as_view(), name='popular-gifts'),
+    path('gift-teaser/', views.GiftTeaserDataView.as_view(), name='gift-teaser'),
+    path('gift-teaser/mark-as-gift/', views.MarkOrderAsGiftView.as_view(), name='mark-as-gift'),
 ]
