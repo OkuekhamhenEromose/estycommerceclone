@@ -435,3 +435,114 @@ class FashionFindsDataSerializer(serializers.Serializer):
             {'value': 'custom', 'label': 'Custom'}
         ]
     })
+
+#::::: GIFT FINDER SERIALIZERS :::::
+
+class GiftOccasionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftOccasion
+        fields = '__all__'
+
+class GiftPersonaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftPersona
+        fields = '__all__'
+
+class GiftCollectionProductSerializer(serializers.ModelSerializer):
+    product = ProductListSerializer(read_only=True)
+    product_id = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(),
+        source='product',
+        write_only=True
+    )
+    
+    class Meta:
+        model = GiftCollectionProduct
+        fields = '__all__'
+
+class GiftCollectionSerializer(serializers.ModelSerializer):
+    persona = GiftPersonaSerializer(read_only=True)
+    persona_id = serializers.PrimaryKeyRelatedField(
+        queryset=GiftPersona.objects.all(),
+        source='persona',
+        write_only=True
+    )
+    products = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = GiftCollection
+        fields = '__all__'
+    
+    def get_products(self, obj):
+        collection_products = obj.collection_products.select_related('product').order_by('display_order')[:6]
+        products = [cp.product for cp in collection_products if cp.product.is_available]
+        
+        # If no products in collection, get some default ones
+        if not products:
+            products = Product.objects.filter(
+                is_available=True,
+                in_stock__gt=0
+            ).order_by('-rating')[:6]
+        
+        return ProductListSerializer(products, many=True).data
+
+class GiftRecipientItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftRecipientItem
+        fields = '__all__'
+
+class GiftRecipientSerializer(serializers.ModelSerializer):
+    items = GiftRecipientItemSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = GiftRecipient
+        fields = '__all__'
+
+class GiftGridItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftGridItem
+        fields = '__all__'
+
+class GiftInterestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftInterest
+        fields = '__all__'
+
+class PopularGiftCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PopularGiftCategory
+        fields = '__all__'
+
+class GiftFinderDataSerializer(serializers.Serializer):
+    """Serializer for complete Gift Finder page data"""
+    hero_occasions = GiftOccasionSerializer(many=True)
+    browse_interests = GiftInterestSerializer(many=True)
+    featured_collections = GiftCollectionSerializer(many=True)
+    recipients = GiftRecipientSerializer(many=True)
+    gift_personas = GiftPersonaSerializer(many=True)
+    guilty_pleasures = serializers.SerializerMethodField()
+    zodiac_signs = serializers.SerializerMethodField()
+    popular_gifts = serializers.SerializerMethodField()
+    gift_grid_items = GiftGridItemSerializer(many=True)
+    popular_gift_categories = PopularGiftCategorySerializer(many=True)
+    
+    def get_guilty_pleasures(self, obj):
+        personas = GiftPersona.objects.filter(
+            persona_type='guilty_pleasure',
+            is_active=True
+        ).order_by('order')[:5]
+        return GiftPersonaSerializer(personas, many=True).data
+    
+    def get_zodiac_signs(self, obj):
+        personas = GiftPersona.objects.filter(
+            persona_type='zodiac_sign',
+            is_active=True
+        ).order_by('order')[:5]
+        return GiftPersonaSerializer(personas, many=True).data
+    
+    def get_popular_gifts(self, obj):
+        products = Product.objects.filter(
+            is_available=True,
+            in_stock__gt=0
+        ).order_by('-rating', '-review_count')[:20]
+        return ProductListSerializer(products, many=True).data

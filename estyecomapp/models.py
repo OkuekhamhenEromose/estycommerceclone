@@ -6,6 +6,7 @@ import secrets
 import random
 from .paystack import Paystack
 from users.models import Profile
+from django.utils.text import slugify
 
 #::::: CATEGORY TYPES :::::
 CATEGORY_TYPES = (
@@ -686,3 +687,273 @@ class FashionDiscover(models.Model):
     
     def __str__(self):
         return self.title
+
+#::::: GIFT FINDER MODELS :::::
+
+class GiftOccasion(models.Model):
+    """Gift occasions for the gift finder hero section"""
+    label = models.CharField(max_length=100)
+    date = models.CharField(max_length=20, blank=True, null=True)
+    icon = models.CharField(max_length=50)  # Lucide icon name
+    slug = models.SlugField(max_length=100, unique=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'label']
+    
+    def __str__(self):
+        return self.label
+
+class GiftPersona(models.Model):
+    """Personas for gift ideas (e.g., The Vegetarian, The Jewellery Lover)"""
+    PERSONA_TYPES = (
+        ('collection', 'Collection Persona'),
+        ('guilty_pleasure', 'Guilty Pleasure'),
+        ('zodiac_sign', 'Zodiac Sign'),
+        ('interest', 'Interest'),
+        ('related_idea', 'Related Gift Idea'),
+    )
+    
+    name = models.CharField(max_length=100)
+    persona_type = models.CharField(max_length=50, choices=PERSONA_TYPES, default='collection')
+    title = models.CharField(max_length=200, blank=True, null=True)  # For collection titles
+    description = models.TextField(blank=True, null=True)
+    image = models.ImageField(upload_to='gift_personas/', blank=True, null=True)
+    bg_color = models.CharField(max_length=50, blank=True, null=True)  # Tailwind class
+    accent_color = models.CharField(max_length=50, blank=True, null=True)
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'name']
+    
+    def __str__(self):
+        return f"{self.get_persona_type_display()} - {self.name}"
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+class GiftCollection(models.Model):
+    """Gift collections featured in Browse by Interest"""
+    persona = models.ForeignKey(GiftPersona, on_delete=models.CASCADE, related_name='collections')
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    interest_tag = models.CharField(max_length=100, blank=True, null=True)  # For filtering by interest
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+    
+    def __str__(self):
+        return f"{self.persona.name} - {self.title}"
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(f"{self.persona.name}-{self.title}")
+        super().save(*args, **kwargs)
+
+class GiftCollectionProduct(models.Model):
+    """Products in gift collections"""
+    collection = models.ForeignKey(GiftCollection, on_delete=models.CASCADE, related_name='collection_products')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='gift_collections')
+    custom_title = models.CharField(max_length=255, blank=True, null=True)
+    display_order = models.PositiveIntegerField(default=0)
+    is_featured = models.BooleanField(default=False)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['display_order', '-created']
+        unique_together = ['collection', 'product']
+    
+    def __str__(self):
+        return f"{self.collection.title} - {self.product.title}"
+
+class GiftRecipient(models.Model):
+    """Recipient categories for Extraordinary Finds section"""
+    label = models.CharField(max_length=100)
+    icon = models.CharField(max_length=50)  # Lucide icon name
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'label']
+    
+    def __str__(self):
+        return self.label
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.label)
+        super().save(*args, **kwargs)
+
+class GiftRecipientItem(models.Model):
+    """Items within recipient categories"""
+    recipient = models.ForeignKey(GiftRecipient, on_delete=models.CASCADE, related_name='items')
+    title = models.CharField(max_length=200)
+    image = models.ImageField(upload_to='gift_recipients/', blank=True, null=True)
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='recipient_items')
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+    
+    def __str__(self):
+        return f"{self.recipient.label} - {self.title}"
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(f"{self.recipient.label}-{self.title}")
+        super().save(*args, **kwargs)
+
+class GiftGridItem(models.Model):
+    """Items for the gift grid on hero section"""
+    SIZE_CHOICES = (
+        ('small', 'Small'),
+        ('large', 'Large'),
+    )
+    
+    title = models.CharField(max_length=200)
+    image = models.ImageField(upload_to='gift_grid/')
+    size = models.CharField(max_length=10, choices=SIZE_CHOICES, default='small')
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='gift_grid_items')
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'title']
+    
+    def __str__(self):
+        return self.title
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+        super().save(*args, **kwargs)
+
+class GiftInterest(models.Model):
+    """Interests for the Browse by Interest section"""
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'name']
+    
+    def __str__(self):
+        return self.name
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+class PopularGiftCategory(models.Model):
+    """Categories for Discover Popular Gifts section"""
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', 'name']
+    
+    def __str__(self):
+        return self.name
+    
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+#::::: GIFT TEASER MODELS :::::
+
+class GiftTeaserBanner(models.Model):
+    """Gift teaser banner content"""
+    title = models.CharField(max_length=200)
+    badge_text = models.CharField(max_length=50, default="✨ New")
+    description = models.TextField()
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', '-created']
+    
+    def __str__(self):
+        return self.title
+
+class GiftTeaserFeature(models.Model):
+    """Features list for gift teaser"""
+    banner = models.ForeignKey(GiftTeaserBanner, on_delete=models.CASCADE, related_name='features')
+    icon = models.CharField(max_length=50)  # Lucide icon name
+    text = models.CharField(max_length=200)
+    order = models.PositiveIntegerField(default=0)
+    
+    class Meta:
+        ordering = ['order']
+    
+    def __str__(self):
+        return f"{self.banner.title} - {self.text[:30]}"
+
+class GiftCardBanner(models.Model):
+    """Gift card banner content"""
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    button_text = models.CharField(max_length=50, default="Pick a design")
+    button_url = models.CharField(max_length=500, default="/gift-cards")
+    gradient_from = models.CharField(max_length=50, default="from-yellow-300")
+    gradient_via = models.CharField(max_length=50, default="via-orange-400")
+    gradient_to = models.CharField(max_length=50, default="to-green-500")
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['order', '-created']
+    
+    def __str__(self):
+        return self.title
+
+class AboutGiftFinder(models.Model):
+    """About section content for Gift Finder"""
+    title = models.CharField(max_length=200, default="If you need gift ideas for anybody – and we mean ANYBODY – in your life, you've come to the right place.")
+    description = models.TextField()
+    icon = models.CharField(max_length=50, default="Gift")
+    button_text_more = models.CharField(max_length=20, default="More")
+    button_text_less = models.CharField(max_length=20, default="Less")
+    is_active = models.BooleanField(default=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return "About Gift Finder"

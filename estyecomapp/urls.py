@@ -69,4 +69,8 @@ urlpatterns = [
     path('best-of-valentine/', views.BestOfValentineView.as_view(), name='best-of-valentine'),
     path('home-favourites/', views.HomeFavouritesView.as_view(), name='home-favourites'),
     path('fashion-finds/', views.FashionFindsView.as_view(), name='fashion-finds'),
+    # Gift Finder endpoints
+    path('gift-finder/', views.GiftFinderDataView.as_view(), name='gift-finder'),
+    path('gift-finder/collections/', views.GiftCollectionByInterestView.as_view(), name='gift-collections'),
+    path('gift-finder/popular-gifts/', views.PopularGiftsByCategoryView.as_view(), name='popular-gifts'),
 ]

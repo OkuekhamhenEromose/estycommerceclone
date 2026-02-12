@@ -2209,3 +2209,348 @@ class FashionFindsView(APIView):
                 'detail': error_detail,
                 'message': 'Failed to fetch Fashion Finds data'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#::::: GIFT FINDER VIEWS :::::
+
+class GiftFinderDataView(APIView):
+    """Get all data for the Gift Finder page"""
+    
+    def get(self, request):
+        try:
+            # Get all active gift occasions
+            hero_occasions = GiftOccasion.objects.filter(is_active=True).order_by('order')
+            
+            # Get all active gift interests
+            browse_interests = GiftInterest.objects.filter(is_active=True).order_by('order')
+            
+            # Get featured collections
+            featured_collections = GiftCollection.objects.filter(
+                is_active=True
+            ).prefetch_related(
+                Prefetch('collection_products', queryset=GiftCollectionProduct.objects.select_related('product')),
+                'persona'
+            ).order_by('order')[:2]
+            
+            # Get all recipients with their items
+            recipients = GiftRecipient.objects.filter(
+                is_active=True
+            ).prefetch_related(
+                Prefetch('items', queryset=GiftRecipientItem.objects.filter(is_active=True).order_by('order'))
+            ).order_by('order')[:2]
+            
+            # Get gift personas for Get Inspired section
+            gift_personas = GiftPersona.objects.filter(
+                persona_type='interest',
+                is_active=True
+            ).order_by('order')[:10]
+            
+            # Get guilty pleasures
+            guilty_pleasures = GiftPersona.objects.filter(
+                persona_type='guilty_pleasure',
+                is_active=True
+            ).order_by('order')[:5]
+            
+            # Get zodiac signs
+            zodiac_signs = GiftPersona.objects.filter(
+                persona_type='zodiac_sign',
+                is_active=True
+            ).order_by('order')[:5]
+            
+            # Get gift grid items
+            gift_grid_items = GiftGridItem.objects.filter(is_active=True).order_by('order')[:8]
+            
+            # Get popular gift categories
+            popular_categories = PopularGiftCategory.objects.filter(is_active=True).order_by('order')
+            
+            # If no data exists, populate with default data
+            self._populate_default_data_if_empty()
+            
+            # Re-fetch after potential population
+            hero_occasions = GiftOccasion.objects.filter(is_active=True).order_by('order')
+            browse_interests = GiftInterest.objects.filter(is_active=True).order_by('order')
+            featured_collections = GiftCollection.objects.filter(is_active=True).order_by('order')[:2]
+            recipients = GiftRecipient.objects.filter(is_active=True).order_by('order')[:2]
+            gift_personas = GiftPersona.objects.filter(persona_type='interest', is_active=True).order_by('order')[:10]
+            guilty_pleasures = GiftPersona.objects.filter(persona_type='guilty_pleasure', is_active=True).order_by('order')[:5]
+            zodiac_signs = GiftPersona.objects.filter(persona_type='zodiac_sign', is_active=True).order_by('order')[:5]
+            gift_grid_items = GiftGridItem.objects.filter(is_active=True).order_by('order')[:8]
+            popular_categories = PopularGiftCategory.objects.filter(is_active=True).order_by('order')
+            
+            response_data = {
+                'hero_occasions': GiftOccasionSerializer(hero_occasions, many=True).data,
+                'browse_interests': GiftInterestSerializer(browse_interests, many=True).data,
+                'featured_collections': GiftCollectionSerializer(featured_collections, many=True).data,
+                'recipients': GiftRecipientSerializer(recipients, many=True).data,
+                'gift_personas': GiftPersonaSerializer(gift_personas, many=True).data,
+                'guilty_pleasures': GiftPersonaSerializer(guilty_pleasures, many=True).data,
+                'zodiac_signs': GiftPersonaSerializer(zodiac_signs, many=True).data,
+                'gift_grid_items': GiftGridItemSerializer(gift_grid_items, many=True).data,
+                'popular_gift_categories': PopularGiftCategorySerializer(popular_categories, many=True).data,
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            return Response({
+                'error': str(e),
+                'detail': error_detail,
+                'message': 'Failed to fetch Gift Finder data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _populate_default_data_if_empty(self):
+        """Populate default data if no records exist"""
+        
+        # Populate Gift Occasions
+        if not GiftOccasion.objects.exists():
+            occasions = [
+                {'label': "Valentine's Day", 'date': "14 Feb", 'icon': 'Heart', 'slug': 'valentines-day', 'order': 1},
+                {'label': "Easter", 'date': "05 Apr", 'icon': 'Egg', 'slug': 'easter', 'order': 2},
+                {'label': "Lunar New Year", 'date': "17 Feb", 'icon': 'Moon', 'slug': 'lunar-new-year', 'order': 3},
+                {'label': "Eid", 'date': "20 Mar", 'icon': 'Star', 'slug': 'eid', 'order': 4},
+                {'label': "Wedding", 'icon': 'Cake', 'slug': 'wedding', 'order': 5},
+                {'label': "Birthday", 'icon': 'Cake', 'slug': 'birthday', 'order': 6},
+                {'label': "Anniversary", 'icon': 'CircleDot', 'slug': 'anniversary', 'order': 7},
+                {'label': "Thank You", 'icon': 'Mail', 'slug': 'thank-you', 'order': 8},
+                {'label': "Sympathy", 'icon': 'Flower', 'slug': 'sympathy', 'order': 9},
+                {'label': "Get Well", 'icon': 'SmilePlus', 'slug': 'get-well', 'order': 10},
+                {'label': "Engagement", 'icon': 'Gift', 'slug': 'engagement', 'order': 11},
+            ]
+            for occasion in occasions:
+                GiftOccasion.objects.create(**occasion)
+        
+        # Populate Gift Interests
+        if not GiftInterest.objects.exists():
+            interests = [
+                "Jewellery", "Beer, Wine & Cocktails", "Crafting", "Nature", "Useful Gifts",
+                "Music", "Collectibles", "Films", "Science", "Family", "Pets",
+                "Health & Fitness", "Tech", "Astrology", "Cooking & Baking", "Reading", "Sports",
+            ]
+            for i, interest in enumerate(interests):
+                GiftInterest.objects.create(name=interest, order=i)
+        
+        # Populate Gift Personas for collections
+        if not GiftPersona.objects.filter(persona_type='collection').exists():
+            vegetarian = GiftPersona.objects.create(
+                name="The Vegetarian",
+                persona_type='collection',
+                bg_color="bg-green-50",
+                accent_color="bg-green-600",
+                order=1
+            )
+            
+            jewellery_lover = GiftPersona.objects.create(
+                name="The Jewellery Lover",
+                persona_type='collection',
+                bg_color="bg-purple-50",
+                accent_color="bg-purple-600",
+                order=2
+            )
+            
+            # Create collections for these personas
+            veg_collection = GiftCollection.objects.create(
+                persona=vegetarian,
+                title="Vegetable Earrings",
+                interest_tag="Jewellery",
+                order=1
+            )
+            
+            jewellery_collection = GiftCollection.objects.create(
+                persona=jewellery_lover,
+                title="Resin Statement Necklaces",
+                interest_tag="Jewellery",
+                order=2
+            )
+        
+        # Populate Gift Recipients
+        if not GiftRecipient.objects.exists():
+            partner = GiftRecipient.objects.create(
+                label="For your Partner",
+                icon="Heart",
+                slug="for-your-partner",
+                order=1
+            )
+            
+            parent = GiftRecipient.objects.create(
+                label="For your Parent",
+                icon="Users",
+                slug="for-your-parent",
+                order=2
+            )
+            
+            # Add items for Partner
+            partner_items = [
+                "Gemstone Rings", "Self Care Gift Boxes", "Handmade Candles",
+                "Birthstone Jewellery", "Handmade Leather Bracelets", "Date Ideas"
+            ]
+            for i, item in enumerate(partner_items):
+                GiftRecipientItem.objects.create(
+                    recipient=partner,
+                    title=item,
+                    order=i
+                )
+            
+            # Add items for Parent
+            parent_items = [
+                "Desk Organisers and Trays", "Monogram Washbags", "Handmade Leather Keyrings",
+                "Handmade Bath Products", "Birthstone Rings", "Spa Gift Sets"
+            ]
+            for i, item in enumerate(parent_items):
+                GiftRecipientItem.objects.create(
+                    recipient=parent,
+                    title=item,
+                    order=i
+                )
+        
+        # Populate other recipients
+        other_recipients = [
+            {"label": "Kids", "icon": "Baby", "slug": "kids"},
+            {"label": "Coworker", "icon": "Briefcase", "slug": "coworker"},
+            {"label": "Sibling", "icon": "Users", "slug": "sibling"},
+            {"label": "Friend", "icon": "UserPlus", "slug": "friend"},
+            {"label": "Teacher", "icon": "GraduationCap", "slug": "teacher"},
+            {"label": "Grandparent", "icon": "User", "slug": "grandparent"},
+        ]
+        for recipient in other_recipients:
+            GiftRecipient.objects.get_or_create(
+                label=recipient["label"],
+                defaults={
+                    "icon": recipient["icon"],
+                    "slug": recipient["slug"],
+                    "order": 10
+                }
+            )
+        
+        # Populate Gift Personas for Get Inspired
+        if not GiftPersona.objects.filter(persona_type='interest').exists():
+            personas = [
+                {"name": "Gadget Obsessed", "bg_color": "bg-sky-200", "accent_color": "bg-orange-500"},
+                {"name": "Adventurer", "bg_color": "bg-sky-200", "accent_color": "bg-orange-500"},
+                {"name": "K-pop Stan", "bg_color": "bg-green-500", "accent_color": "bg-yellow-400"},
+                {"name": "Music Lover", "bg_color": "bg-blue-600", "accent_color": "bg-blue-300"},
+                {"name": "Science Buff", "bg_color": "bg-orange-400", "accent_color": "bg-sky-200"},
+                {"name": "Fisherman", "bg_color": "bg-orange-400", "accent_color": "bg-sky-200"},
+                {"name": "Renaissance Faire Fan", "bg_color": "bg-yellow-400", "accent_color": "bg-purple-300"},
+                {"name": "Crafter", "bg_color": "bg-green-800", "accent_color": "bg-yellow-400"},
+                {"name": "Girlfriend", "bg_color": "bg-yellow-300", "accent_color": "bg-green-400"},
+                {"name": "Coffee Connoisseur", "bg_color": "bg-green-500", "accent_color": "bg-green-300"},
+            ]
+            for i, persona in enumerate(personas):
+                GiftPersona.objects.create(
+                    name=persona["name"],
+                    persona_type='interest',
+                    bg_color=persona["bg_color"],
+                    accent_color=persona["accent_color"],
+                    order=i
+                )
+        
+        # Populate Guilty Pleasures
+        if not GiftPersona.objects.filter(persona_type='guilty_pleasure').exists():
+            guilty = [
+                {"name": "Alien Obsessed", "bg_color": "bg-yellow-400"},
+                {"name": "Pasta Lover", "bg_color": "bg-yellow-400"},
+                {"name": "Karaoke Crooner", "bg_color": "bg-green-800"},
+                {"name": "Chocoholic", "bg_color": "bg-green-500"},
+                {"name": "Anime Fan", "bg_color": "bg-green-500"},
+            ]
+            for i, persona in enumerate(guilty):
+                GiftPersona.objects.create(
+                    name=persona["name"],
+                    persona_type='guilty_pleasure',
+                    bg_color=persona["bg_color"],
+                    order=i
+                )
+        
+        # Populate Zodiac Signs
+        if not GiftPersona.objects.filter(persona_type='zodiac_sign').exists():
+            zodiac = [
+                {"name": "Aquarius", "bg_color": "bg-green-500"},
+                {"name": "Astrology Expert", "bg_color": "bg-yellow-300"},
+                {"name": "Scorpio", "bg_color": "bg-orange-500"},
+                {"name": "Taurus", "bg_color": "bg-sky-200"},
+                {"name": "Gemini", "bg_color": "bg-orange-400"},
+            ]
+            for i, persona in enumerate(zodiac):
+                GiftPersona.objects.create(
+                    name=persona["name"],
+                    persona_type='zodiac_sign',
+                    bg_color=persona["bg_color"],
+                    order=i
+                )
+        
+        # Populate Gift Grid Items
+        if not GiftGridItem.objects.exists():
+            grid_items = [
+                {"title": "Date Night Ideas", "size": "small", "order": 1},
+                {"title": '"Reasons I Love You" Gifts', "size": "large", "order": 2},
+                {"title": "Forever Flowers", "size": "small", "order": 3},
+                {"title": "Valentine's Day Cards", "size": "small", "order": 4},
+                {"title": "Pocket Hugs", "size": "small", "order": 5},
+                {"title": "Where We Met Gifts", "size": "large", "order": 6},
+                {"title": "Artisanal Chocolate Boxes", "size": "small", "order": 7},
+                {"title": "Pressed Flower Gifts", "size": "small", "order": 8},
+            ]
+            for item in grid_items:
+                GiftGridItem.objects.create(**item)
+        
+        # Populate Popular Gift Categories
+        if not PopularGiftCategory.objects.exists():
+            categories = ["Jewellery", "Clothing", "Home Decor", "Accessories", "Pet Gifts"]
+            for i, cat in enumerate(categories):
+                PopularGiftCategory.objects.create(name=cat, order=i)
+
+class GiftCollectionByInterestView(APIView):
+    """Get gift collections filtered by interest"""
+    
+    def get(self, request):
+        interest = request.query_params.get('interest', 'Jewellery')
+        
+        try:
+            collections = GiftCollection.objects.filter(
+                interest_tag=interest,
+                is_active=True
+            ).prefetch_related(
+                Prefetch('collection_products', queryset=GiftCollectionProduct.objects.select_related('product')),
+                'persona'
+            ).order_by('order')[:2]
+            
+            # If no collections found for this interest, return default ones
+            if not collections.exists():
+                collections = GiftCollection.objects.filter(is_active=True).order_by('order')[:2]
+            
+            serializer = GiftCollectionSerializer(collections, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PopularGiftsByCategoryView(APIView):
+    """Get popular gifts filtered by category"""
+    
+    pagination_class = StandardResultsSetPagination
+    
+    def get(self, request):
+        category = request.query_params.get('category', 'Jewellery')
+        
+        try:
+            products = Product.objects.filter(
+                Q(category__title__icontains=category) |
+                Q(title__icontains=category) |
+                Q(tags__name__icontains=category),
+                is_available=True,
+                in_stock__gt=0
+            ).distinct().order_by('-rating', '-review_count')[:8]
+            
+            # If no products found, return random popular products
+            if not products.exists():
+                products = Product.objects.filter(
+                    is_available=True,
+                    in_stock__gt=0
+                ).order_by('-rating', '-review_count')[:8]
+            
+            serializer = ProductListSerializer(products, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
