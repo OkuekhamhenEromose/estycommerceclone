@@ -1,140 +1,224 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
-from django.db.models import Avg, Count, Q
+from django.core.cache import cache
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from django.utils.text import slugify
 import uuid
 import secrets
 import random
-from .paystack import Paystack
 from users.models import Profile
-from django.utils.text import slugify
+from django.db.models import Q
 
-#::::: CATEGORY TYPES :::::
+# ========== CACHE KEYS ==========
+class CacheKeys:
+    """Centralized cache key management"""
+    CATEGORY_PREFIX = 'cat:'
+    PRODUCT_PREFIX = 'prod:'
+    HOMEPAGE = 'homepage:data'
+    DEALS = 'deals:list'
+    GIFT_GUIDES = 'gift:guides'
+    TOP_100 = 'top:100'
+    COLLECTION_PREFIX = 'coll:'
+    
+    @staticmethod
+    def category(slug): return f"{CacheKeys.CATEGORY_PREFIX}{slug}"
+    @staticmethod
+    def product(slug): return f"{CacheKeys.PRODUCT_PREFIX}{slug}"
+    @staticmethod
+    def category_products(slug, limit=20): return f"cat:prod:{slug}:{limit}"
+    @staticmethod
+    def collection(id): return f"{CacheKeys.COLLECTION_PREFIX}{id}"
+    @staticmethod
+    def parent_category(id): return f"parent:cat:{id}"
+
+# ========== CATEGORY TYPES ==========
 CATEGORY_TYPES = (
     ('main', 'Main Category'),
     ('gift_occasion', 'Gift Occasion'),
     ('gift_interest', 'Gift Interest'),
     ('gift_recipient', 'Gift For Everyone'),
     ('gift_popular', 'Popular Gifts'),
-    ('homepage_section', 'Homepage Section'),
     ('gifts', 'Gifts'),
     ('fashion_finds', 'Fashion Finds'),
     ('home_favourites', 'Home Favourites'),
-    ('special_collection', 'Special Collection'),
 )
 
-#::::: PARENT CATEGORY Model :::::
+# ========== PARENT CATEGORY ==========
 class ParentCategory(models.Model):
-    """Top-level navigation categories like 'Gifts', 'Home & Living', etc."""
-    name = models.CharField(max_length=100, unique=True)
-    slug = models.SlugField(max_length=100, unique=True)
+    """Top-level navigation categories with caching"""
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    slug = models.SlugField(max_length=100, unique=True, db_index=True)
     description = models.TextField(blank=True, null=True)
     icon = models.ImageField(upload_to='parent_categories/', blank=True, null=True)
-    order = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    is_featured = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_featured = models.BooleanField(default=False, db_index=True)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
     
     class Meta:
         ordering = ['order', 'name']
         verbose_name_plural = 'Parent Categories'
+        indexes = [
+            models.Index(fields=['slug', 'is_active']),
+            models.Index(fields=['is_featured', 'order']),
+        ]
     
     def __str__(self):
         return self.name
     
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Clear homepage cache when categories change
+        cache.delete(CacheKeys.HOMEPAGE)
+        cache.delete(CacheKeys.parent_category(self.id))
+    
+    def delete(self, *args, **kwargs):
+        cache.delete(CacheKeys.HOMEPAGE)
+        cache.delete(CacheKeys.parent_category(self.id))
+        super().delete(*args, **kwargs)
+    
     def get_product_count(self):
-        """Get total products across all categories"""
-        count = 0
-        for category in self.categories.filter(is_active=True):
-            count += category.get_all_products_count()
+        """Cached product count"""
+        cache_key = f'parent:cat:count:{self.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = sum(c.get_all_products_count() for c in self.categories.filter(is_active=True))
+            cache.set(cache_key, count, 3600)  # 1 hour
         return count
 
-#::::: CATEGORY Model :::::
+# ========== CATEGORY ==========
 class Category(models.Model):
-    """Main product categories and subcategories"""
+    """Main product categories with caching"""
     parent_category = models.ForeignKey(
-        ParentCategory, 
-        on_delete=models.CASCADE, 
-        related_name='categories',
-        null=True,
-        blank=True
+        ParentCategory, on_delete=models.CASCADE, related_name='categories',
+        null=True, blank=True, db_index=True
     )
     parent = models.ForeignKey(
-        'self', 
-        on_delete=models.CASCADE, 
-        related_name='subcategories',
-        null=True,
-        blank=True
+        'self', on_delete=models.CASCADE, related_name='subcategories',
+        null=True, blank=True, db_index=True
     )
-    title = models.CharField(max_length=100)
-    slug = models.SlugField(max_length=100, unique=True, null=True, blank=True)
+    title = models.CharField(max_length=100, db_index=True)
+    slug = models.SlugField(max_length=100, unique=True, db_index=True)
     category_type = models.CharField(
-        max_length=50, 
-        choices=CATEGORY_TYPES, 
-        default='main'
+        max_length=50, choices=CATEGORY_TYPES, default='main', db_index=True
     )
     description = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='categories/')
     icon = models.CharField(max_length=50, blank=True, null=True)
-    order = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    is_featured = models.BooleanField(default=False)
-    show_in_top_100 = models.BooleanField(default=False)  # For Top 100 Gifts
+    order = models.PositiveIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_featured = models.BooleanField(default=False, db_index=True)
+    show_in_top_100 = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
     
     class Meta:
         ordering = ['order', 'title']
         verbose_name_plural = 'Categories'
+        indexes = [
+            models.Index(fields=['slug', 'is_active']),
+            models.Index(fields=['category_type', 'is_featured']),
+            models.Index(fields=['parent', 'order']),
+        ]
     
     def __str__(self):
         return self.title
     
-    def get_all_products(self):
-        """Get all products including from subcategories"""
-        products = list(self.products.filter(is_available=True))
-        for subcategory in self.subcategories.filter(is_active=True):
-            products.extend(subcategory.get_all_products())
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+        super().save(*args, **kwargs)
+        # Clear related caches
+        cache.delete(CacheKeys.category(self.slug))
+        cache.delete(CacheKeys.HOMEPAGE)
+        if self.parent_category_id:
+            cache.delete(CacheKeys.parent_category(self.parent_category_id))
+    
+    def delete(self, *args, **kwargs):
+        cache.delete(CacheKeys.category(self.slug))
+        cache.delete(CacheKeys.HOMEPAGE)
+        if self.parent_category_id:
+            cache.delete(CacheKeys.parent_category(self.parent_category_id))
+        super().delete(*args, **kwargs)
+    
+    def get_all_products(self, limit=20):
+        """Get products with caching"""
+        cache_key = CacheKeys.category_products(self.slug, limit)
+        products = cache.get(cache_key)
+        if products is None:
+            products = list(
+                self.products.filter(is_available=True, in_stock__gt=0)
+                .select_related('brand')
+                .only('id', 'title', 'slug', 'price', 'discount_price', 
+                     'main', 'rating', 'review_count', 'brand__name')
+                .order_by('-rating')[:limit]
+            )
+            cache.set(cache_key, products, 1800)  # 30 minutes
         return products
     
     def get_all_products_count(self):
-        """Get count of all products including subcategories"""
-        count = self.products.filter(is_available=True).count()
-        for subcategory in self.subcategories.filter(is_active=True):
-            count += subcategory.get_all_products_count()
+        """Cached count"""
+        cache_key = f'cat:count:{self.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = self.products.filter(is_available=True).count()
+            for sub in self.subcategories.filter(is_active=True):
+                count += sub.get_all_products_count()
+            cache.set(cache_key, count, 3600)  # 1 hour
         return count
     
     def get_top_rated_products(self, limit=10):
-        """Get top rated products from this category"""
-        return self.products.filter(
-            is_available=True,
-            rating__gte=4.0
-        ).order_by('-rating', '-review_count')[:limit]
+        """Get top rated products with caching"""
+        cache_key = f'cat:top:{self.slug}:{limit}'
+        products = cache.get(cache_key)
+        if products is None:
+            products = list(
+                self.products.filter(is_available=True, rating__gte=4.0)
+                .select_related('brand')
+                .only('id', 'title', 'slug', 'price', 'discount_price', 
+                     'main', 'rating', 'review_count')
+                .order_by('-rating', '-review_count')[:limit]
+            )
+            cache.set(cache_key, products, 1800)  # 30 minutes
+        return products
 
-#::::: PRODUCT TAGS Model :::::
-class Tag(models.Model):
-    """Tags for better product organization and search"""
-    name = models.CharField(max_length=50, unique=True)
-    slug = models.SlugField(max_length=50, unique=True)
-    created = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return self.name
-
-#::::: BRAND Model :::::
+# ========== BRAND ==========
 class Brand(models.Model):
-    """Product brands/manufacturers"""
-    name = models.CharField(max_length=100, unique=True)
-    slug = models.SlugField(max_length=100, unique=True)
+    """Product brands with caching"""
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    slug = models.SlugField(max_length=100, unique=True, db_index=True)
     logo = models.ImageField(upload_to='brands/', blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        indexes = [models.Index(fields=['slug', 'is_active'])]
+    
+    def __str__(self):
+        return self.name
+    
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        cache.delete_pattern('brand:*')
+    
+    def delete(self, *args, **kwargs):
+        cache.delete_pattern('brand:*')
+        super().delete(*args, **kwargs)
+
+# ========== TAG ==========
+class Tag(models.Model):
+    """Product tags with caching"""
+    name = models.CharField(max_length=50, unique=True, db_index=True)
+    slug = models.SlugField(max_length=50, unique=True, db_index=True)
     created = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return self.name
 
-#::::: PRODUCT SIZE Model :::::
+# ========== PRODUCT SIZE ==========
 class ProductSize(models.Model):
     """Size options for products"""
     SIZE_CATEGORIES = (
@@ -145,20 +229,22 @@ class ProductSize(models.Model):
         ('other', 'Other'),
     )
     
-    category = models.CharField(max_length=50, choices=SIZE_CATEGORIES)
-    name = models.CharField(max_length=50)  # e.g., 'Small', 'Medium', 'Large', '8', '9', '10'
-    code = models.CharField(max_length=20)  # e.g., 'S', 'M', 'L', '8', '9', '10'
+    category = models.CharField(max_length=50, choices=SIZE_CATEGORIES, db_index=True)
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=20)
     order = models.PositiveIntegerField(default=0)
     
     class Meta:
         ordering = ['category', 'order', 'name']
         unique_together = ['category', 'code']
+        indexes = [models.Index(fields=['category', 'code'])]
     
     def __str__(self):
         return f"{self.get_category_display()} - {self.name}"
 
-#::::: PRODUCT Model :::::
+# ========== PRODUCT ==========
 class Product(models.Model):
+    """Main product model with extensive caching"""
     CONDITION_CHOICES = (
         ('new', 'New'),
         ('like_new', 'Like New'),
@@ -167,26 +253,24 @@ class Product(models.Model):
         ('handmade', 'Handmade'),
     )
     
-    title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255, unique=True)
+    # Core fields
+    title = models.CharField(max_length=255, db_index=True)
+    slug = models.SlugField(max_length=255, unique=True, db_index=True)
     description = models.TextField()
     short_description = models.CharField(max_length=500, blank=True, null=True)
     
     # Pricing
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     discount_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        null=True, 
-        blank=True,
+        max_digits=10, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(0)]
     )
     
     # Relationships
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
-    brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, related_name='products', null=True, blank=True)
-    tags = models.ManyToManyField(Tag, blank=True, related_name='products')
-    available_sizes = models.ManyToManyField(ProductSize, blank=True, related_name='products')
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products', db_index=True)
+    brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
+    tags = models.ManyToManyField(Tag, blank=True)
+    available_sizes = models.ManyToManyField(ProductSize, blank=True)
     
     # Images
     main = models.ImageField(upload_to='products/')
@@ -197,53 +281,46 @@ class Product(models.Model):
     
     # Product details
     product_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
-    sku = models.CharField(max_length=100, unique=True, blank=True, null=True)
+    sku = models.CharField(max_length=100, unique=True, blank=True, null=True, db_index=True)
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, default='new')
     
     # Inventory
-    is_available = models.BooleanField(default=True)
+    is_available = models.BooleanField(default=True, db_index=True)
     in_stock = models.PositiveIntegerField(default=0)
     low_stock_threshold = models.PositiveIntegerField(default=5)
     out_of_stock_date = models.DateField(null=True, blank=True)
     restock_date = models.DateField(null=True, blank=True)
     
     # Features
-    is_featured = models.BooleanField(default=False)
-    is_bestseller = models.BooleanField(default=False)
-    is_deal = models.BooleanField(default=False)
-    is_new_arrival = models.BooleanField(default=False)
-    include_in_top_100 = models.BooleanField(default=False)  # For Top 100 Gifts selection
+    is_featured = models.BooleanField(default=False, db_index=True)
+    is_bestseller = models.BooleanField(default=False, db_index=True)
+    is_deal = models.BooleanField(default=False, db_index=True)
+    is_new_arrival = models.BooleanField(default=False, db_index=True)
+    include_in_top_100 = models.BooleanField(default=False)
     
-    # Physical attributes (optional)
-    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Weight in kg")
-    dimensions = models.CharField(max_length=100, blank=True, null=True, help_text="L x W x H in cm")
-    color = models.CharField(max_length=50, blank=True, null=True)
+    # Physical attributes
+    color = models.CharField(max_length=50, blank=True, null=True, db_index=True)
     material = models.CharField(max_length=100, blank=True, null=True)
     
-    # Ratings and reviews
+    # Ratings
     rating = models.DecimalField(
-        max_digits=3, 
-        decimal_places=2, 
-        default=0,
+        max_digits=3, decimal_places=2, default=0,
         validators=[MinValueValidator(0), MaxValueValidator(5)]
     )
     review_count = models.PositiveIntegerField(default=0)
     
-    # SEO and metadata
+    # SEO
     meta_description = models.TextField(blank=True, null=True)
     meta_keywords = models.CharField(max_length=255, blank=True, null=True)
     
-    # Seller information
+    # Seller
     seller = models.ForeignKey(
-        Profile, 
-        on_delete=models.CASCADE, 
-        related_name='products_sold',
-        null=True,
-        blank=True
+        Profile, on_delete=models.CASCADE, related_name='products_sold',
+        null=True, blank=True, db_index=True
     )
     
     # Timestamps
-    created = models.DateTimeField(auto_now_add=True)
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
     
     class Meta:
@@ -251,14 +328,24 @@ class Product(models.Model):
         indexes = [
             models.Index(fields=['category', 'is_available']),
             models.Index(fields=['is_featured', 'is_deal']),
-            models.Index(fields=['-created']),
             models.Index(fields=['-rating']),
+            models.Index(fields=['is_deal', '-discount_price']),
+            models.Index(fields=['is_bestseller', '-rating']),
+            models.Index(fields=['is_new_arrival', '-created']),
         ]
     
     def __str__(self):
         return self.title
     
     def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        old_slug = None
+        if not is_new:
+            try:
+                old_slug = Product.objects.get(pk=self.pk).slug
+            except Product.DoesNotExist:
+                pass
+        
         if not self.product_id:
             self.product_id = uuid.uuid4()
         
@@ -270,6 +357,21 @@ class Product(models.Model):
             self.out_of_stock_date = None
         
         super().save(*args, **kwargs)
+        
+        # Clear caches
+        cache.delete(CacheKeys.product(self.slug))
+        if old_slug and old_slug != self.slug:
+            cache.delete(CacheKeys.product(old_slug))
+        cache.delete(CacheKeys.HOMEPAGE)
+        cache.delete(CacheKeys.DEALS)
+        cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
+    
+    def delete(self, *args, **kwargs):
+        cache.delete(CacheKeys.product(self.slug))
+        cache.delete(CacheKeys.HOMEPAGE)
+        cache.delete(CacheKeys.DEALS)
+        cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
+        super().delete(*args, **kwargs)
     
     @property
     def discount_percentage(self):
@@ -290,12 +392,26 @@ class Product(models.Model):
         return self.in_stock == 0
     
     def get_star_rating_display(self):
-        """Return star rating as tuple (full_stars, half_star, empty_stars)"""
         full_stars = int(self.rating)
         has_half = (self.rating - full_stars) >= 0.5
         half_star = 1 if has_half else 0
         empty_stars = 5 - full_stars - half_star
         return (full_stars, half_star, empty_stars)
+
+# ========== SIGNAL HANDLERS ==========
+@receiver(post_save, sender=Category)
+@receiver(post_delete, sender=Category)
+def invalidate_category_cache(sender, instance, **kwargs):
+    cache.delete(CacheKeys.category(instance.slug))
+    cache.delete_pattern('cat:prod:*')
+
+@receiver(post_save, sender=Product)
+@receiver(post_delete, sender=Product)
+def invalidate_product_caches(sender, instance, **kwargs):
+    cache.delete(CacheKeys.DEALS)
+    cache.delete(CacheKeys.HOMEPAGE)
+    if instance.category:
+        cache.delete_pattern(f'cat:prod:{instance.category.slug}:*')
 
 #::::: TOP 100 GIFTS Model :::::
 class Top100Gifts(models.Model):

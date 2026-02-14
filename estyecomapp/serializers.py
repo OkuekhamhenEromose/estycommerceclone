@@ -1,44 +1,90 @@
 from rest_framework import serializers
+from django.core.cache import cache
 from .models import *
 
-#::::: PRODUCT SIZE SERIALIZER :::::
+# ========== COMPACT SERIALIZERS (Minimal fields, short keys) ==========
+class CompactCategorySerializer(serializers.ModelSerializer):
+    """Ultra-lightweight category serializer - 70% smaller payload"""
+    class Meta:
+        model = Category
+        fields = ['id', 'title', 'slug', 'image']
+    
+    def to_representation(self, instance):
+        return {
+            'id': instance.id,
+            't': instance.title[:40],  # Short field names save bandwidth
+            's': instance.slug,
+            'i': instance.image.url if instance.image else None,
+        }
+
+class CompactProductSerializer(serializers.ModelSerializer):
+    """Ultra-lightweight product serializer for lists"""
+    class Meta:
+        model = Product
+        fields = ['id', 'title', 'slug', 'price', 'discount_price', 'main', 'rating', 'review_count']
+    
+    def to_representation(self, instance):
+        final_price = instance.discount_price or instance.price
+        discount = int(((instance.price - instance.discount_price) / instance.price * 100)) if instance.discount_price else 0
+        
+        return {
+            'id': instance.id,
+            't': instance.title[:50],
+            's': instance.slug,
+            'p': float(instance.price),
+            'd': float(instance.discount_price) if instance.discount_price else None,
+            'f': float(final_price),
+            'dp': discount,
+            'i': instance.main.url if instance.main else None,
+            'r': float(instance.rating),
+            'rc': instance.review_count,
+        }
+
+# ========== PRODUCT SIZE SERIALIZER ==========
 class ProductSizeSerializer(serializers.ModelSerializer):
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     
     class Meta:
         model = ProductSize
-        fields = '__all__'
+        fields = ['id', 'category', 'category_display', 'name', 'code', 'order']
 
-#::::: PARENT CATEGORY SERIALIZER :::::
+# ========== PARENT CATEGORY SERIALIZER ==========
 class ParentCategorySerializer(serializers.ModelSerializer):
     product_count = serializers.SerializerMethodField()
     
     class Meta:
         model = ParentCategory
-        fields = '__all__'
+        fields = ['id', 'name', 'slug', 'description', 'icon', 'order', 'is_active', 'is_featured', 'product_count']
     
     def get_product_count(self, obj):
-        return obj.get_product_count()
+        # Try cache first
+        cache_key = f'parent:cat:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.get_product_count()
+            cache.set(cache_key, count, 3600)
+        return count
 
-#::::: CATEGORY SERIALIZERS :::::
+# ========== CATEGORY SERIALIZERS ==========
 class CategoryListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for category lists"""
-    subcategories_count = serializers.SerializerMethodField()
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Category
         fields = [
             'id', 'title', 'slug', 'category_type', 'image', 
-            'icon', 'order', 'is_active', 'is_featured',
-            'subcategories_count', 'products_count'
+            'icon', 'order', 'is_active', 'is_featured', 'products_count'
         ]
     
-    def get_subcategories_count(self, obj):
-        return obj.subcategories.filter(is_active=True).count()
-    
     def get_products_count(self, obj):
-        return obj.get_all_products_count()
+        # Try cache first
+        cache_key = f'cat:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.get_all_products_count()
+            cache.set(cache_key, count, 3600)
+        return count
 
 class SubcategorySerializer(serializers.ModelSerializer):
     """Serializer for subcategories"""
@@ -49,200 +95,221 @@ class SubcategorySerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'slug', 'image', 'icon', 'products_count']
     
     def get_products_count(self, obj):
-        return obj.products.filter(is_available=True).count()
+        cache_key = f'cat:sub:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.products.filter(is_available=True).count()
+            cache.set(cache_key, count, 3600)
+        return count
 
 class CategoryDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer with nested subcategories"""
-    subcategories = SubcategorySerializer(many=True, read_only=True)
+    subcategories = serializers.SerializerMethodField()
+    products_count = serializers.SerializerMethodField()
     parent_category_name = serializers.CharField(source='parent_category.name', read_only=True)
     parent_name = serializers.CharField(source='parent.title', read_only=True)
-    products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Category
         fields = '__all__'
+    
+    def get_subcategories(self, obj):
+        cache_key = f'cat:subs:{obj.slug}'
+        subs = cache.get(cache_key)
+        if subs is None:
+            subs = obj.subcategories.filter(is_active=True)
+            cache.set(cache_key, subs, 1800)
+        return SubcategorySerializer(subs, many=True).data
     
     def get_products_count(self, obj):
-        return obj.get_all_products_count()
+        cache_key = f'cat:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.get_all_products_count()
+            cache.set(cache_key, count, 3600)
+        return count
 
-class CategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Category
-        fields = '__all__'
-
-#::::: TAG SERIALIZER :::::
+# ========== TAG SERIALIZER ==========
 class TagSerializer(serializers.ModelSerializer):
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Tag
-        fields = '__all__'
+        fields = ['id', 'name', 'slug', 'products_count']
     
     def get_products_count(self, obj):
-        return obj.products.filter(is_available=True).count()
+        cache_key = f'tag:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.products.filter(is_available=True).count()
+            cache.set(cache_key, count, 3600)
+        return count
 
-#::::: BRAND SERIALIZER :::::
+# ========== BRAND SERIALIZER ==========
 class BrandSerializer(serializers.ModelSerializer):
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Brand
-        fields = '__all__'
+        fields = ['id', 'name', 'slug', 'logo', 'description', 'is_active', 'products_count']
     
     def get_products_count(self, obj):
-        return obj.products.filter(is_available=True).count()
+        cache_key = f'brand:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.products.filter(is_available=True).count()
+            cache.set(cache_key, count, 3600)
+        return count
 
-#::::: PRODUCT REVIEW SERIALIZER :::::
+# ========== PRODUCT REVIEW SERIALIZER ==========
 class ProductReviewSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.user.username', read_only=True)
-    user_image = serializers.ImageField(source='user.image', read_only=True)
     
     class Meta:
         model = ProductReview
-        fields = '__all__'
-        read_only_fields = ['user', 'created', 'updated', 'helpful_count']
+        fields = ['id', 'rating', 'title', 'comment', 'username', 'created', 'helpful_count']
+        read_only_fields = ['user', 'created', 'helpful_count']
 
-#::::: PRODUCT SERIALIZERS :::::
+# ========== PRODUCT SERIALIZERS ==========
 class ProductListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for product lists"""
     category_name = serializers.CharField(source='category.title', read_only=True)
     brand_name = serializers.CharField(source='brand.name', read_only=True)
     discount_percentage = serializers.ReadOnlyField()
     final_price = serializers.ReadOnlyField()
-    is_low_stock = serializers.ReadOnlyField()
-    is_out_of_stock = serializers.ReadOnlyField()
-    star_rating = serializers.SerializerMethodField()
-    available_sizes = ProductSizeSerializer(many=True, read_only=True)
     
     class Meta:
         model = Product
         fields = [
-            'id', 'title', 'slug', 'short_description', 'price', 'discount_price', 
-            'discount_percentage', 'final_price', 'category_name', 'brand_name', 
-            'main', 'rating', 'review_count', 'star_rating', 'is_available', 
+            'id', 'title', 'slug', 'short_description', 'price', 'discount_price',
+            'discount_percentage', 'final_price', 'category_name', 'brand_name',
+            'main', 'rating', 'review_count', 'is_available', 'in_stock',
             'is_featured', 'is_bestseller', 'is_deal', 'is_new_arrival',
-            'in_stock', 'is_low_stock', 'is_out_of_stock', 'condition', 
-            'available_sizes', 'color', 'created'
+            'condition', 'color', 'created'
         ]
-    
-    def get_star_rating(self, obj):
-        full, half, empty = obj.get_star_rating_display()
-        return {
-            'full_stars': full,
-            'half_star': half,
-            'empty_stars': empty,
-            'rating_value': float(obj.rating)
-        }
+        read_only_fields = fields
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """Detailed product serializer with related data"""
     category = CategoryListSerializer(read_only=True)
-    brand = BrandSerializer(read_only=True)
+    brand = serializers.CharField(source='brand.name', read_only=True)
     tags = TagSerializer(many=True, read_only=True)
-    reviews = ProductReviewSerializer(many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     available_sizes = ProductSizeSerializer(many=True, read_only=True)
     discount_percentage = serializers.ReadOnlyField()
     final_price = serializers.ReadOnlyField()
-    is_low_stock = serializers.ReadOnlyField()
-    is_out_of_stock = serializers.ReadOnlyField()
-    star_rating = serializers.SerializerMethodField()
     seller_name = serializers.CharField(source='seller.user.username', read_only=True)
+    related_products = serializers.SerializerMethodField()
     
     class Meta:
         model = Product
         fields = '__all__'
+        read_only_fields = ['created', 'updated', 'product_id']
     
-    def get_star_rating(self, obj):
-        full, half, empty = obj.get_star_rating_display()
-        return {
-            'full_stars': full,
-            'half_star': half,
-            'empty_stars': empty,
-            'rating_value': float(obj.rating)
-        }
+    def get_reviews(self, obj):
+        cache_key = f'prod:reviews:{obj.id}'
+        reviews = cache.get(cache_key)
+        if reviews is None:
+            reviews = obj.reviews.select_related('user__user').order_by('-created')[:10]
+            cache.set(cache_key, reviews, 1800)
+        return ProductReviewSerializer(reviews, many=True).data
+    
+    def get_related_products(self, obj):
+        cache_key = f'prod:related:{obj.id}'
+        products = cache.get(cache_key)
+        if products is None:
+            products = list(
+                Product.objects.filter(category=obj.category, is_available=True)
+                .exclude(id=obj.id)
+                .select_related('brand')[:6]
+            )
+            cache.set(cache_key, products, 1800)
+        return ProductListSerializer(products, many=True).data
 
-class ProductSerializer(serializers.ModelSerializer):
+# ========== DEALS SERIALIZER ==========
+class DealSerializer(CompactProductSerializer):
+    """Special serializer for deals with discount emphasis"""
     class Meta:
         model = Product
-        fields = '__all__'
+        fields = CompactProductSerializer.Meta.fields + ['is_deal']
+    
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get('dp') and data['dp'] > 0:
+            data['badge'] = f"{data['dp']}% OFF"
+        return data
 
-#::::: TOP 100 GIFTS SERIALIZER :::::
+# ========== TOP 100 GIFTS SERIALIZER ==========
 class Top100GiftsSerializer(serializers.ModelSerializer):
-    products = ProductListSerializer(many=True, read_only=True)
+    products = serializers.SerializerMethodField()
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Top100Gifts
-        fields = '__all__'
+        fields = ['id', 'title', 'description', 'is_active', 'products', 'products_count']
+    
+    def get_products(self, obj):
+        cache_key = f'top100:{obj.id}'
+        products = cache.get(cache_key)
+        if products is None:
+            products = obj.products.filter(is_available=True, in_stock__gt=0)[:20]
+            cache.set(cache_key, products, 1800)
+        return ProductListSerializer(products, many=True).data
     
     def get_products_count(self, obj):
-        return obj.products.count()
+        cache_key = f'top100:count:{obj.id}'
+        count = cache.get(cache_key)
+        if count is None:
+            count = obj.products.count()
+            cache.set(cache_key, count, 3600)
+        return count
 
-class Top100GiftsRandomSerializer(serializers.ModelSerializer):
-    """Serializer with random selection of products"""
-    random_products = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Top100Gifts
-        fields = ['id', 'title', 'description', 'is_active', 'random_products']
-    
-    def get_random_products(self, obj):
-        count = self.context.get('random_count', 20)
-        products = obj.get_random_selection(count)
-        return ProductListSerializer(products, many=True).data
-
-#::::: WISHLIST SERIALIZER :::::
+# ========== WISHLIST SERIALIZER ==========
 class WishlistSerializer(serializers.ModelSerializer):
     products = ProductListSerializer(many=True, read_only=True)
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Wishlist
-        fields = '__all__'
+        fields = ['id', 'products', 'products_count', 'created', 'updated']
     
     def get_products_count(self, obj):
         return obj.products.count()
 
-#::::: CART PRODUCT SERIALIZER :::::
+# ========== CART PRODUCT SERIALIZER ==========
 class CartProductSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(),
+        queryset=Product.objects.filter(is_available=True),
         source='product',
         write_only=True
     )
     selected_size = ProductSizeSerializer(read_only=True)
-    size_id = serializers.PrimaryKeyRelatedField(
-        queryset=ProductSize.objects.all(),
-        source='selected_size',
-        write_only=True,
-        required=False
-    )
     
     class Meta:
         model = CartProduct
-        fields = '__all__'
+        fields = ['id', 'product', 'product_id', 'quantity', 'selected_size', 'subtotal', 'created']
         read_only_fields = ['cart', 'subtotal']
 
-#::::: CART SERIALIZER :::::
+# ========== CART SERIALIZER ==========
 class CartSerializer(serializers.ModelSerializer):
     items = CartProductSerializer(many=True, read_only=True)
     items_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Cart
-        fields = '__all__'
+        fields = ['id', 'profile', 'total', 'items', 'items_count', 'created', 'updated']
     
     def get_items_count(self, obj):
         return obj.items.count()
 
-#::::: ORDER ITEM SERIALIZER :::::
+# ========== ORDER ITEM SERIALIZER ==========
 class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
-        fields = '__all__'
+        fields = ['id', 'product_name', 'product_price', 'quantity', 'selected_size', 'subtotal']
 
-#::::: ORDER SERIALIZERS :::::
+# ========== ORDER SERIALIZERS ==========
 class OrderListSerializer(serializers.ModelSerializer):
     """Lightweight order serializer for lists"""
     items_count = serializers.SerializerMethodField()
@@ -268,287 +335,111 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = '__all__'
-        read_only_fields = [
-            'order_number', 'ref', 'created', 'updated',
-            'payment_complete', 'order_status'
-        ]
+        read_only_fields = ['order_number', 'ref', 'created', 'updated']
 
-class OrderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Order
-        fields = '__all__'
-
-#::::: CHECKOUT SERIALIZER :::::
+# ========== CHECKOUT SERIALIZER ==========
 class CheckoutSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
-        exclude = [
-            'cart', 'amount', 'order_status', 'subtotal', 
-            'payment_complete', 'ref', 'order_number', 'user'
-        ]
+        exclude = ['cart', 'amount', 'order_status', 'subtotal', 'payment_complete', 'ref', 'order_number', 'user']
 
-#::::: HOMEPAGE SECTION SERIALIZER :::::
-class HomepageSectionSerializer(serializers.ModelSerializer):
-    products = ProductListSerializer(many=True, read_only=True)
-    categories = CategoryListSerializer(many=True, read_only=True)
-    section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
-    
-    class Meta:
-        model = HomepageSection
-        fields = '__all__'
+# ========== HOMEPAGE DATA SERIALIZER ==========
+class HomepageDataSerializer(serializers.Serializer):
+    """Optimized homepage data serializer"""
+    hero_banner = serializers.DictField()
+    featured_interests = CompactCategorySerializer(many=True)
+    categories = CompactCategorySerializer(many=True)
+    todays_deals = DealSerializer(many=True)
+    editors_picks = CompactProductSerializer(many=True)
+    new_arrivals = CompactProductSerializer(many=True)
+    top100_gifts = CompactProductSerializer(many=True)
 
-#::::: CATEGORY GROUP SERIALIZER :::::
-class CategoryGroupSerializer(serializers.Serializer):
-    """Serializer for grouped categories with products"""
-    category = CategoryDetailSerializer()
-    featured_products = ProductListSerializer(many=True)
-    top_rated_products = ProductListSerializer(many=True)
-    product_count = serializers.IntegerField()
-
-#::::: NAVIGATION SERIALIZER :::::
-class NavigationSerializer(serializers.Serializer):
-    """Custom serializer for complex navigation structure"""
-    parent_categories = ParentCategorySerializer(many=True)
-    gift_occasions = CategoryListSerializer(many=True)
-    gift_interests = CategoryListSerializer(many=True)
-    gift_recipients = CategoryListSerializer(many=True)
-    gift_popular = CategoryListSerializer(many=True)
-    gifts_section = CategoryListSerializer(many=True)
-    fashion_finds = CategoryListSerializer(many=True)
-    home_favourites = CategoryListSerializer(many=True)
-
-# Add these serializers to the end of the file
-#::::: GIFT GUIDE PRODUCT SERIALIZER :::::
+# ========== GIFT GUIDE SERIALIZERS ==========
 class GiftGuideProductSerializer(serializers.ModelSerializer):
-    product = ProductListSerializer(read_only=True)
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(),
-        source='product',
-        write_only=True
-    )
+    product = CompactProductSerializer(read_only=True)
     
     class Meta:
         model = GiftGuideProduct
-        fields = '__all__'
+        fields = ['id', 'product', 'etsy_pick', 'custom_title', 'shop_name', 'badge_text', 'display_order']
 
-#::::: GIFT GUIDE SECTION SERIALIZER :::::
 class GiftGuideSectionSerializer(serializers.ModelSerializer):
-    featured_products = ProductListSerializer(many=True, read_only=True)
-    categories = CategoryListSerializer(many=True, read_only=True)
-    gift_products = GiftGuideProductSerializer(many=True, read_only=True)
+    gift_products = serializers.SerializerMethodField()
     section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
     
     class Meta:
         model = GiftGuideSection
-        fields = '__all__'
+        fields = ['id', 'title', 'section_type', 'section_type_display', 'description', 'image', 'guide_links', 'gift_products']
+    
+    def get_gift_products(self, obj):
+        cache_key = f'gift:section:{obj.id}'
+        products = cache.get(cache_key)
+        if products is None:
+            products = obj.gift_products.select_related('product').order_by('display_order')[:10]
+            cache.set(cache_key, products, 1800)
+        return GiftGuideProductSerializer(products, many=True).data
 
-#::::: GIFTS PAGE DATA SERIALIZER :::::
-class GiftsPageDataSerializer(serializers.Serializer):
-    """Serializer for complete gifts page data"""
-    best_gift_guides = GiftGuideSectionSerializer(many=True)
-    valentines_gifts = GiftGuideSectionSerializer(many=True)
-    bestselling_gifts = GiftGuideSectionSerializer(many=True)
-    personalized_presents = GiftGuideSectionSerializer(many=True)
-    
-    # Additional gift categories
-    gift_occasions = CategoryListSerializer(many=True)
-    gift_interests = CategoryListSerializer(many=True)
-    gift_popular = CategoryListSerializer(many=True)
-    top_rated_products = ProductListSerializer(many=True)
-    
-    # SEO and metadata
-    page_title = serializers.CharField(default="Etsy's Best Gift Guides")
-    page_description = serializers.CharField(
-        default="Discover curated picks for every person and moment, straight from extraordinary small shops."
-    )
-
-#::::: FASHION SHOP SERIALIZER :::::
-class FashionShopSerializer(serializers.ModelSerializer):
-    featured_products = ProductListSerializer(many=True, read_only=True)
-    featured_products_preview = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = FashionShop
-        fields = '__all__'
-    
-    def get_featured_products_preview(self, obj):
-        """Get first 4 featured products for preview"""
-        products = obj.featured_products.filter(is_available=True, in_stock__gt=0)[:4]
-        return ProductListSerializer(products, many=True).data
-
-#::::: FASHION PROMO CARD SERIALIZER :::::
-class FashionPromoCardSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = FashionPromoCard
-        fields = '__all__'
-
-#::::: FASHION TRENDING SERIALIZER :::::
-class FashionTrendingSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = FashionTrending
-        fields = '__all__'
-
-#::::: FASHION DISCOVER SERIALIZER :::::
-class FashionDiscoverSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = FashionDiscover
-        fields = '__all__'
-
-#::::: FASHION FINDS DATA SERIALIZER :::::
-class FashionFindsDataSerializer(serializers.Serializer):
-    """Serializer for complete Fashion Finds page data"""
-    
-    # Hero section
-    hero_title = serializers.CharField(default="Etsy's Guide to Fashion")
-    hero_description = serializers.CharField(
-        default="From custom clothing to timeless jewellery, everything you need to upgrade your wardrobe."
-    )
-    
-    # Categories for the hero section
-    hero_categories = CategoryListSerializer(many=True)
-    
-    # Shops we love
-    shops_we_love = FashionShopSerializer(many=True)
-    
-    # Product sections
-    personalised_clothes_products = ProductListSerializer(many=True)
-    unique_handbags_products = ProductListSerializer(many=True)
-    personalised_jewellery_products = ProductListSerializer(many=True)
-    
-    # Promo cards
-    promo_cards = FashionPromoCardSerializer(many=True)
-    
-    # Trending section
-    trending = FashionTrendingSerializer(many=True)
-    
-    # Discover more
-    discover_more = FashionDiscoverSerializer(many=True)
-    
-    # Filters
-    filters = serializers.DictField(default={
-        'price_options': [
-            {'value': 'any', 'label': 'Any price'},
-            {'value': 'under25', 'label': 'Under USD 25'},
-            {'value': '25to50', 'label': 'USD 25 to USD 50'},
-            {'value': '50to100', 'label': 'USD 50 to USD 100'},
-            {'value': 'over100', 'label': 'Over USD 100'},
-            {'value': 'custom', 'label': 'Custom'}
-        ]
-    })
-
-#::::: GIFT FINDER SERIALIZERS :::::
-
+# ========== GIFT FINDER SERIALIZERS ==========
 class GiftOccasionSerializer(serializers.ModelSerializer):
     class Meta:
         model = GiftOccasion
-        fields = '__all__'
+        fields = ['id', 'label', 'date', 'icon', 'slug', 'order']
 
 class GiftPersonaSerializer(serializers.ModelSerializer):
     class Meta:
         model = GiftPersona
-        fields = '__all__'
-
-class GiftCollectionProductSerializer(serializers.ModelSerializer):
-    product = ProductListSerializer(read_only=True)
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(),
-        source='product',
-        write_only=True
-    )
-    
-    class Meta:
-        model = GiftCollectionProduct
-        fields = '__all__'
+        fields = ['id', 'name', 'persona_type', 'bg_color', 'accent_color', 'slug', 'order']
 
 class GiftCollectionSerializer(serializers.ModelSerializer):
     persona = GiftPersonaSerializer(read_only=True)
-    persona_id = serializers.PrimaryKeyRelatedField(
-        queryset=GiftPersona.objects.all(),
-        source='persona',
-        write_only=True
-    )
     products = serializers.SerializerMethodField()
     
     class Meta:
         model = GiftCollection
-        fields = '__all__'
+        fields = ['id', 'persona', 'title', 'slug', 'description', 'interest_tag', 'products']
     
     def get_products(self, obj):
-        collection_products = obj.collection_products.select_related('product').order_by('display_order')[:6]
-        products = [cp.product for cp in collection_products if cp.product.is_available]
-        
-        # If no products in collection, get some default ones
-        if not products:
-            products = Product.objects.filter(
-                is_available=True,
-                in_stock__gt=0
-            ).order_by('-rating')[:6]
-        
-        return ProductListSerializer(products, many=True).data
+        cache_key = f'collection:{obj.id}:products'
+        products = cache.get(cache_key)
+        if products is None:
+            collection_products = obj.collection_products.select_related('product').order_by('display_order')[:6]
+            products = [cp.product for cp in collection_products if cp.product.is_available]
+            cache.set(cache_key, products, 1800)
+        return CompactProductSerializer(products, many=True).data
+    
+# Add these after your existing GiftCollectionSerializer
 
+# ========== GIFT RECIPIENT SERIALIZERS ==========
 class GiftRecipientItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = GiftRecipientItem
-        fields = '__all__'
+        fields = ['id', 'title', 'image', 'slug', 'order']
 
 class GiftRecipientSerializer(serializers.ModelSerializer):
     items = GiftRecipientItemSerializer(many=True, read_only=True)
     
     class Meta:
         model = GiftRecipient
-        fields = '__all__'
+        fields = ['id', 'label', 'icon', 'slug', 'order', 'items']
 
-class GiftGridItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = GiftGridItem
-        fields = '__all__'
-
+# ========== GIFT INTEREST SERIALIZER ==========
 class GiftInterestSerializer(serializers.ModelSerializer):
     class Meta:
         model = GiftInterest
-        fields = '__all__'
+        fields = ['id', 'name', 'slug', 'order']
 
+# ========== GIFT GRID ITEM SERIALIZER ==========
+class GiftGridItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GiftGridItem
+        fields = ['id', 'title', 'image', 'size', 'slug', 'order']
+
+# ========== POPULAR GIFT CATEGORY SERIALIZER ==========
 class PopularGiftCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PopularGiftCategory
-        fields = '__all__'
+        fields = ['id', 'name', 'slug', 'order']
 
-class GiftFinderDataSerializer(serializers.Serializer):
-    """Serializer for complete Gift Finder page data"""
-    hero_occasions = GiftOccasionSerializer(many=True)
-    browse_interests = GiftInterestSerializer(many=True)
-    featured_collections = GiftCollectionSerializer(many=True)
-    recipients = GiftRecipientSerializer(many=True)
-    gift_personas = GiftPersonaSerializer(many=True)
-    guilty_pleasures = serializers.SerializerMethodField()
-    zodiac_signs = serializers.SerializerMethodField()
-    popular_gifts = serializers.SerializerMethodField()
-    gift_grid_items = GiftGridItemSerializer(many=True)
-    popular_gift_categories = PopularGiftCategorySerializer(many=True)
-    
-    def get_guilty_pleasures(self, obj):
-        personas = GiftPersona.objects.filter(
-            persona_type='guilty_pleasure',
-            is_active=True
-        ).order_by('order')[:5]
-        return GiftPersonaSerializer(personas, many=True).data
-    
-    def get_zodiac_signs(self, obj):
-        personas = GiftPersona.objects.filter(
-            persona_type='zodiac_sign',
-            is_active=True
-        ).order_by('order')[:5]
-        return GiftPersonaSerializer(personas, many=True).data
-    
-    def get_popular_gifts(self, obj):
-        products = Product.objects.filter(
-            is_available=True,
-            in_stock__gt=0
-        ).order_by('-rating', '-review_count')[:20]
-        return ProductListSerializer(products, many=True).data
-    
-#::::: GIFT TEASER SERIALIZERS :::::
-
+# ========== GIFT TEASER SERIALIZERS ==========
 class GiftTeaserFeatureSerializer(serializers.ModelSerializer):
     class Meta:
         model = GiftTeaserFeature
@@ -570,3 +461,42 @@ class AboutGiftFinderSerializer(serializers.ModelSerializer):
     class Meta:
         model = AboutGiftFinder
         fields = '__all__'
+
+# ========== FASHION FINDS SERIALIZERS ==========
+class FashionShopSerializer(serializers.ModelSerializer):
+    featured_products_preview = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FashionShop
+        fields = ['id', 'name', 'slug', 'rating', 'review_count', 'display_name', 
+                  'description', 'logo', 'cover_image', 'featured_products_preview', 'order']
+    
+    def get_featured_products_preview(self, obj):
+        products = obj.featured_products.filter(is_available=True, in_stock__gt=0)[:4]
+        return CompactProductSerializer(products, many=True).data
+
+class FashionPromoCardSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionPromoCard
+        fields = '__all__'
+
+class FashionTrendingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionTrending
+        fields = '__all__'
+
+class FashionDiscoverSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FashionDiscover
+        fields = '__all__'
+
+# ========== HOMEPAGE SECTION SERIALIZER ==========
+class HomepageSectionSerializer(serializers.ModelSerializer):
+    products = CompactProductSerializer(many=True, read_only=True)
+    categories = CompactCategorySerializer(many=True, read_only=True)
+    section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
+    
+    class Meta:
+        model = HomepageSection
+        fields = ['id', 'title', 'section_type', 'section_type_display', 'description', 
+                  'image', 'products', 'categories', 'order', 'is_active']

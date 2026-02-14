@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from decouple import config, Csv
 from datetime import timedelta
-import dj_database_url  # Add to requirements
+import dj_database_url  
 
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,7 +45,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'api.middleware.APILoggingMiddleware',  # Optional: for monitoring
+    # 'api.middleware.APILoggingMiddleware',  # Optional: for monitoring
 ]
 
 ROOT_URLCONF = 'api.urls'
@@ -77,13 +77,13 @@ DATABASES = {
 }
 
 # Add connection pooling
-DATABASES['default']['OPTIONS'] = {
-    'pool': {
-        'min_size': 5,
-        'max_size': 20,
-        'timeout': 30,
-    }
-}
+# DATABASES['default']['OPTIONS'] = {
+#     'pool': {
+#         'min_size': 5,
+#         'max_size': 20,
+#         'timeout': 30,
+#     }
+# }
 
 # ========== REDIS CACHING ==========
 CACHES = {
@@ -92,7 +92,6 @@ CACHES = {
         'LOCATION': config('REDIS_URL', default='redis://localhost:6379/1'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PARSER_CLASS': 'redis.connection.HiredisParser',
             'CONNECTION_POOL_CLASS': 'redis.BlockingConnectionPool',
             'CONNECTION_POOL_CLASS_KWARGS': {
                 'max_connections': 50,
@@ -240,11 +239,11 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs/django.log'),
-            'formatter': 'verbose',
-        },
+        # 'file': {
+        #     'class': 'logging.FileHandler',
+        #     'filename': os.path.join(BASE_DIR, 'logs/django.log'),
+        #     'formatter': 'verbose',
+        # },
     },
     'root': {
         'handlers': ['console'],
