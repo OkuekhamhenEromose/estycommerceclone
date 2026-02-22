@@ -180,26 +180,56 @@ CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
 
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv(), default='http://localhost:3000')
 
-# ========== STATIC FILES & MEDIA (CDN OPTIMIZATION) ==========
-STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# ========== AWS S3 CONFIGURATION ==========
+# Use S3 for both development and production if credentials are provided
+USE_S3 = config('USE_S3', default=not DEBUG, cast=bool)
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-# Use Cloudflare R2 or S3 for media in production
-if not DEBUG:
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+if USE_S3:
+    # AWS Credentials
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
-    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='https://s3.amazonaws.com')
-    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
-    AWS_QUERYSTRING_AUTH = False  # Public URLs
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='eu-north-1')
+    
+    # S3 Settings
+    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+    AWS_S3_URL_PROTOCOL = 'https:'
+    AWS_S3_USE_SSL = True
+    AWS_S3_SECURE_URLS = True
+    
+    # Disable query string authentication (public URLs)
+    AWS_QUERYSTRING_AUTH = False
+    
+    # Object parameters for caching
     AWS_S3_OBJECT_PARAMETERS = {
-        'CacheControl': 'max-age=86400',
+        'CacheControl': 'max-age=86400',  # 24 hours cache
     }
+    
+    # Storage locations
+    AWS_LOCATION = 'media'  # Base folder for all media files
+    
+    # Media files
+    DEFAULT_FILE_STORAGE = 'estyecomapp.storage_backends.MediaStorage'  # Custom storage class
+    MEDIA_URL = f'{AWS_S3_URL_PROTOCOL}//{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/'
+    
+    # For better performance with large files
+    AWS_S3_FILE_OVERWRITE = False  # Don't overwrite files with same name
+    AWS_DEFAULT_ACL = 'public-read'  # Make uploaded files public
+    
+    # Log S3 configuration
+    print(f"✅ Using S3 Storage: {AWS_STORAGE_BUCKET_NAME}")
+    print(f"📁 Media URL: {MEDIA_URL}")
+else:
+    # Local storage for development
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+    print("⚠️ Using local file storage")
+
+# ========== STATIC FILES ==========
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # ========== EMAIL (ASYNC) ==========
 EMAIL_BACKEND = config(

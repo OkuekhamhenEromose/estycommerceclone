@@ -2,6 +2,7 @@ from django.core.cache import cache
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from .models import Product, Category, ParentCategory, Top100Gifts
+from django.conf import settings
 
 def invalidate_homepage_cache():
     """Invalidate all homepage-related caches"""
@@ -48,3 +49,9 @@ def parent_category_changed(sender, instance, **kwargs):
 def top100_changed(sender, instance, **kwargs):
     cache.delete('top100:data')
     cache.delete_pattern('homepage:*')
+
+def get_absolute_url(url):
+    """Ensure URL is absolute for S3"""
+    if url and not url.startswith('http'):
+        return f"https://{settings.AWS_S3_CUSTOM_DOMAIN}{url}"
+    return url

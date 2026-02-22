@@ -4,11 +4,13 @@ from django.core.cache import cache
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils.text import slugify
+from django.conf import settings
 import uuid
 import secrets
 import random
 from users.models import Profile
 from django.db.models import Q
+from .storage_backends import MediaStorage
 
 # ========== CACHE KEYS ==========
 class CacheKeys:
@@ -50,7 +52,12 @@ class ParentCategory(models.Model):
     name = models.CharField(max_length=100, unique=True, db_index=True)
     slug = models.SlugField(max_length=100, unique=True, db_index=True)
     description = models.TextField(blank=True, null=True)
-    icon = models.ImageField(upload_to='parent_categories/', blank=True, null=True)
+    icon = models.ImageField(
+        upload_to='parent_categories/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
     order = models.PositiveIntegerField(default=0, db_index=True)
     is_active = models.BooleanField(default=True, db_index=True)
     is_featured = models.BooleanField(default=False, db_index=True)
@@ -105,7 +112,12 @@ class Category(models.Model):
         max_length=50, choices=CATEGORY_TYPES, default='main', db_index=True
     )
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='categories/')
+    image = models.ImageField(
+    upload_to='categories/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+)
     icon = models.CharField(max_length=50, blank=True, null=True)
     order = models.PositiveIntegerField(default=0, db_index=True)
     is_active = models.BooleanField(default=True, db_index=True)
@@ -189,7 +201,12 @@ class Brand(models.Model):
     """Product brands with caching"""
     name = models.CharField(max_length=100, unique=True, db_index=True)
     slug = models.SlugField(max_length=100, unique=True, db_index=True)
-    logo = models.ImageField(upload_to='brands/', blank=True, null=True)
+    logo = models.ImageField(
+        upload_to='brands/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True, db_index=True)
     created = models.DateTimeField(auto_now_add=True)
@@ -271,14 +288,35 @@ class Product(models.Model):
     brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=True, db_index=True)
     tags = models.ManyToManyField(Tag, blank=True)
     available_sizes = models.ManyToManyField(ProductSize, blank=True)
-    
-    # Images
-    main = models.ImageField(upload_to='products/')
-    photo1 = models.ImageField(upload_to='products/', null=True, blank=True)
-    photo2 = models.ImageField(upload_to='products/', null=True, blank=True)
-    photo3 = models.ImageField(upload_to='products/', null=True, blank=True)
-    photo4 = models.ImageField(upload_to='products/', null=True, blank=True)
-    
+    # Images - ALL with S3 storage
+    main = models.ImageField(
+        upload_to='products/',
+        storage=MediaStorage() if settings.USE_S3 else None
+    )
+    photo1 = models.ImageField(
+        upload_to='products/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        null=True,
+        blank=True
+    )
+    photo2 = models.ImageField(
+        upload_to='products/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        null=True,
+        blank=True
+    )
+    photo3 = models.ImageField(
+        upload_to='products/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        null=True,
+        blank=True
+    )
+    photo4 = models.ImageField(
+        upload_to='products/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        null=True,
+        blank=True
+    )
     # Product details
     product_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     sku = models.CharField(max_length=100, unique=True, blank=True, null=True, db_index=True)
@@ -637,7 +675,12 @@ class HomepageSection(models.Model):
     title = models.CharField(max_length=200)
     section_type = models.CharField(max_length=50, choices=SECTION_TYPES)
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='homepage_sections/', blank=True, null=True)
+    image = models.ImageField(
+        upload_to='homepage_sections/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
     products = models.ManyToManyField(Product, blank=True, related_name='homepage_sections')
     categories = models.ManyToManyField(Category, blank=True, related_name='homepage_sections')
     order = models.PositiveIntegerField(default=0)
@@ -665,8 +708,18 @@ class GiftGuideSection(models.Model):
     title = models.CharField(max_length=200)
     section_type = models.CharField(max_length=50, choices=SECTION_CHOICES)
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='gift_sections/', blank=True, null=True)
-    background_image = models.ImageField(upload_to='gift_sections/backgrounds/', blank=True, null=True)
+    image = models.ImageField(
+        upload_to='gift_sections/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
+    background_image = models.ImageField(
+    upload_to='gift_sections/backgrounds/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     
     # Content for Best Gift Guides
     guide_links = models.JSONField(default=list, blank=True, null=True, 
@@ -729,8 +782,18 @@ class FashionShop(models.Model):
     review_count = models.PositiveIntegerField(default=0)
     display_name = models.CharField(max_length=100, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    logo = models.ImageField(upload_to='fashion_shops/', blank=True, null=True)
-    cover_image = models.ImageField(upload_to='fashion_shops/covers/', blank=True, null=True)
+    logo = models.ImageField(
+        upload_to='fashion_shops/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
+    cover_image = models.ImageField(
+    upload_to='fashion_shops/covers/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     
     # Products to display for this shop
     featured_products = models.ManyToManyField(Product, blank=True, related_name='fashion_shops')
@@ -754,7 +817,12 @@ class FashionPromoCard(models.Model):
     title = models.CharField(max_length=200)
     subtitle = models.CharField(max_length=200, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='fashion_promo/')
+    image = models.ImageField(
+    upload_to='fashion_promo/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     button_text = models.CharField(max_length=50, default="Shop now")
     button_url = models.CharField(max_length=500)
     order = models.PositiveIntegerField(default=0)
@@ -775,7 +843,12 @@ class FashionTrending(models.Model):
     title = models.CharField(max_length=200)
     subtitle = models.CharField(max_length=200, blank=True, null=True)
     description = models.TextField()
-    image = models.ImageField(upload_to='fashion_trending/')
+    image = models.ImageField(
+    upload_to='fashion_trending/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     button_text = models.CharField(max_length=50, default="Try it out")
     button_url = models.CharField(max_length=500)
     is_active = models.BooleanField(default=True)
@@ -790,7 +863,12 @@ class FashionTrending(models.Model):
 class FashionDiscover(models.Model):
     """Discover more section for Fashion Finds"""
     title = models.CharField(max_length=200)
-    image = models.ImageField(upload_to='fashion_discover/')
+    image = models.ImageField(
+    upload_to='fashion_discover/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     url = models.CharField(max_length=500)
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -837,7 +915,12 @@ class GiftPersona(models.Model):
     persona_type = models.CharField(max_length=50, choices=PERSONA_TYPES, default='collection')
     title = models.CharField(max_length=200, blank=True, null=True)  # For collection titles
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='gift_personas/', blank=True, null=True)
+    image = models.ImageField(
+        upload_to='gift_personas/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
     bg_color = models.CharField(max_length=50, blank=True, null=True)  # Tailwind class
     accent_color = models.CharField(max_length=50, blank=True, null=True)
     slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
@@ -922,7 +1005,12 @@ class GiftRecipientItem(models.Model):
     """Items within recipient categories"""
     recipient = models.ForeignKey(GiftRecipient, on_delete=models.CASCADE, related_name='items')
     title = models.CharField(max_length=200)
-    image = models.ImageField(upload_to='gift_recipients/', blank=True, null=True)
+    image = models.ImageField(
+        upload_to='gift_recipients/',
+        storage=MediaStorage() if settings.USE_S3 else None,
+        blank=True,
+        null=True
+    )
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='recipient_items')
     slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
     order = models.PositiveIntegerField(default=0)
@@ -949,7 +1037,12 @@ class GiftGridItem(models.Model):
     )
     
     title = models.CharField(max_length=200)
-    image = models.ImageField(upload_to='gift_grid/')
+    image = models.ImageField(
+    upload_to='gift_grid/', 
+    storage=MediaStorage() if settings.USE_S3 else None,
+    blank=True, 
+    null=True
+    )
     size = models.CharField(max_length=10, choices=SIZE_CHOICES, default='small')
     slug = models.SlugField(max_length=100, unique=True, blank=True, null=True)
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='gift_grid_items')
