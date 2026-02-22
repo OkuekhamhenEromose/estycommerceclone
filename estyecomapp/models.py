@@ -12,6 +12,12 @@ from users.models import Profile
 from django.db.models import Q
 from .storage_backends import MediaStorage
 
+# Conditional import of storage backends
+if settings.USE_S3:
+    from .storage_backends import MediaStorage
+else:
+    MediaStorage = None
+
 # ========== CACHE KEYS ==========
 class CacheKeys:
     """Centralized cache key management"""

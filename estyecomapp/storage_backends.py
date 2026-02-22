@@ -6,13 +6,20 @@ class MediaStorage(S3Boto3Storage):
     """
     Custom storage class for media files with folder organization
     """
-    location = settings.AWS_LOCATION
-    file_overwrite = False  # Don't overwrite files with same name
+    def __init__(self, *args, **kwargs):
+        # Only set location if using S3
+        if settings.USE_S3:
+            self.location = getattr(settings, 'AWS_LOCATION', 'media')
+        super().__init__(*args, **kwargs)
     
     def get_available_name(self, name, max_length=None):
         """
         Override to handle duplicate filenames by appending a number
+        Only applies when using S3
         """
+        if not settings.USE_S3:
+            return name
+            
         if self.exists(name):
             dir_name, file_name = os.path.split(name)
             file_root, file_ext = os.path.splitext(file_name)
@@ -26,17 +33,21 @@ class PublicMediaStorage(S3Boto3Storage):
     """
     Storage for publicly accessible media files
     """
-    location = settings.AWS_LOCATION
-    default_acl = 'public-read'
-    file_overwrite = False
-    querystring_auth = False  # URLs don't need authentication
+    def __init__(self, *args, **kwargs):
+        if settings.USE_S3:
+            self.location = getattr(settings, 'AWS_LOCATION', 'media')
+            self.default_acl = 'public-read'
+            self.querystring_auth = False
+        super().__init__(*args, **kwargs)
 
 class PrivateMediaStorage(S3Boto3Storage):
     """
     Storage for private media files (requires signed URLs)
     """
-    location = settings.AWS_LOCATION
-    default_acl = 'private'
-    file_overwrite = False
-    querystring_auth = True  # URLs require authentication
-    querystring_expire = 300  # 5 minutes
+    def __init__(self, *args, **kwargs):
+        if settings.USE_S3:
+            self.location = getattr(settings, 'AWS_LOCATION', 'media')
+            self.default_acl = 'private'
+            self.querystring_auth = True
+            self.querystring_expire = 300
+        super().__init__(*args, **kwargs)
