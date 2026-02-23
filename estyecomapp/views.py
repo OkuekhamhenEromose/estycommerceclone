@@ -82,77 +82,89 @@ class HomepageDataView(APIView, CacheMixin):
             return Response(cached_data, status=status.HTTP_200_OK)
         
         try:
-            # Parallel queries using select_related and only()
-            featured_interests = list(
-                Category.objects.filter(
-                    category_type='gift_interest',
-                    is_featured=True,
-                    is_active=True
-                ).select_related('parent').only(
-                    'id', 'title', 'slug', 'image', 'order'
-                )[:4]
-            )
+            # Safe queries with defaults if tables are empty
+            featured_interests = []
+            if Category.objects.exists():
+                featured_interests = list(
+                    Category.objects.filter(
+                        category_type='gift_interest',
+                        is_featured=True,
+                        is_active=True
+                    ).select_related('parent').only(
+                        'id', 'title', 'slug', 'image', 'order'
+                    )[:4]
+                )
             
-            # Deals - calculate discount in Python
-            deals = list(
-                Product.objects.filter(
-                    is_deal=True,
-                    is_available=True,
-                    in_stock__gt=0,
-                    discount_price__isnull=False
-                ).select_related('brand', 'category').only(
-                    'id', 'title', 'slug', 'price', 'discount_price',
-                    'main', 'rating', 'review_count', 'brand__name',
-                    'category__title'
-                ).order_by('-discount_price')[:4]
-            )
-            
-            # Calculate discount percentages in Python
-            for product in deals:
-                product.discount_percentage = int(
-                    ((product.price - product.discount_price) / product.price) * 100
-                ) if product.discount_price else 0
+            # Deals
+            deals = []
+            if Product.objects.exists():
+                deals = list(
+                    Product.objects.filter(
+                        is_deal=True,
+                        is_available=True,
+                        in_stock__gt=0,
+                        discount_price__isnull=False
+                    ).select_related('brand', 'category').only(
+                        'id', 'title', 'slug', 'price', 'discount_price',
+                        'main', 'rating', 'review_count', 'brand__name',
+                        'category__title'
+                    ).order_by('-discount_price')[:4]
+                )
+                
+                # Calculate discount percentages in Python
+                for product in deals:
+                    product.discount_percentage = int(
+                        ((product.price - product.discount_price) / product.price) * 100
+                    ) if product.discount_price else 0
             
             # Main Categories
-            categories = list(
-                Category.objects.filter(
-                    parent__isnull=True,
-                    is_active=True
-                ).select_related('parent_category').only(
-                    'id', 'title', 'slug', 'image', 'order'
-                )[:6]
-            )
+            categories = []
+            if Category.objects.exists():
+                categories = list(
+                    Category.objects.filter(
+                        parent__isnull=True,
+                        is_active=True
+                    ).select_related('parent_category').only(
+                        'id', 'title', 'slug', 'image', 'order'
+                    )[:6]
+                )
             
             # New Arrivals
-            new_arrivals = list(
-                Product.objects.filter(
-                    is_new_arrival=True,
-                    is_available=True,
-                    in_stock__gt=0
-                ).select_related('brand').only(
-                    'id', 'title', 'slug', 'price', 'discount_price',
-                    'main', 'rating', 'review_count'
-                ).order_by('-created')[:4]
-            )
+            new_arrivals = []
+            if Product.objects.exists():
+                new_arrivals = list(
+                    Product.objects.filter(
+                        is_new_arrival=True,
+                        is_available=True,
+                        in_stock__gt=0
+                    ).select_related('brand').only(
+                        'id', 'title', 'slug', 'price', 'discount_price',
+                        'main', 'rating', 'review_count'
+                    ).order_by('-created')[:4]
+                )
             
             # Editors Picks (Vintage)
-            editors_picks = list(
-                Product.objects.filter(
-                    condition='vintage',
-                    is_available=True,
-                    in_stock__gt=0,
-                    rating__gte=4.0
-                ).select_related('brand').only(
-                    'id', 'title', 'slug', 'price', 'discount_price',
-                    'main', 'rating', 'review_count'
-                ).order_by('-rating')[:4]
-            )
+            editors_picks = []
+            if Product.objects.exists():
+                editors_picks = list(
+                    Product.objects.filter(
+                        condition='vintage',
+                        is_available=True,
+                        in_stock__gt=0,
+                        rating__gte=4.0
+                    ).select_related('brand').only(
+                        'id', 'title', 'slug', 'price', 'discount_price',
+                        'main', 'rating', 'review_count'
+                    ).order_by('-rating')[:4]
+                )
             
             # Top 100 Gifts
             top100 = []
-            top100_collection = Top100Gifts.objects.filter(is_active=True).first()
-            if top100_collection:
-                top100 = top100_collection.get_random_selection(8)
+            top100_collection = None
+            if Top100Gifts.objects.exists():
+                top100_collection = Top100Gifts.objects.filter(is_active=True).first()
+                if top100_collection:
+                    top100 = top100_collection.get_random_selection(8)
             
             # Manual serialization for maximum performance
             data = {
@@ -248,28 +260,6 @@ class HomepageDataView(APIView, CacheMixin):
                 'editors_picks': [],
                 'top100_gifts': [],
             }, status=status.HTTP_200_OK)
-
-class TestHomepageView(APIView):
-    """Simple test endpoint to debug the homepage data"""
-    permission_classes = [AllowAny]
-    
-    def get(self, request):
-        try:
-            return Response({
-                'status': 'success',
-                'message': 'API is working',
-                'endpoint': '/homepage/',
-                'test_data': {
-                    'categories_count': Category.objects.count(),
-                    'products_count': Product.objects.count(),
-                    'sections_count': HomepageSection.objects.count()
-                }
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({
-                'status': 'error',
-                'message': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ========== CATEGORY VIEWS ==========
 class ParentCategoryView(APIView, CacheMixin):

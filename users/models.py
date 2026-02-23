@@ -11,30 +11,32 @@ class Profile(models.Model):
     user = models.OneToOneField(
         User, 
         on_delete=models.CASCADE,
-        related_name='profile',  # Added for reverse lookup
-        db_index=True  # Add index
+        related_name='profile',
+        db_index=True
     )
     fullname = models.CharField(
-        max_length=100,  # Reduced from 255
+        max_length=100,
         validators=[MinLengthValidator(2)]
     )
     phone = models.CharField(
-        max_length=20,  # Reduced from 50
-        db_index=True  # For phone lookups
+        max_length=20,
+        blank=True,
+        null=True,
+        db_index=True
     )
     gender = models.CharField(
-        max_length=1,  # Reduced from 10
+        max_length=1,
         choices=GENDER,
-        db_index=True
+        blank=True,
+        null=True
     )
     profile_pix = models.ImageField(
         upload_to='profile',
         blank=True,
         null=True,
-        default='profile/default-avatar.png'  # Add default
+        default='profile/default-avatar.png'
     )
     
-    # Cache frequently accessed fields
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
