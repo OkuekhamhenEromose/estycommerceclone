@@ -65,6 +65,69 @@ class StandardResultsSetPagination(FastPagination):
     """Alias for FastPagination to maintain compatibility"""
     pass
 
+class SimpleHomepageView(APIView):
+    """Simple homepage data endpoint that always works"""
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        return Response({
+            "hero_banner": {
+                "message": "Find something you love",
+                "search_placeholder": "Search for anything"
+            },
+            "featured_interests": [
+                {
+                    "id": 1,
+                    "title": "Linen Spotlight",
+                    "slug": "linen-spotlight",
+                    "image": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=500&fit=crop",
+                    "products_count": 156
+                },
+                {
+                    "id": 2,
+                    "title": "Mini Gems",
+                    "slug": "mini-gems",
+                    "image": "https://images.unsplash.com/photo-1514228742587-6b1558fcf93a?w=400&h=500&fit=crop",
+                    "products_count": 89
+                }
+            ],
+            "categories": [
+                {
+                    "id": 1,
+                    "title": "Jewelry",
+                    "slug": "jewelry",
+                    "image": "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=400&h=400&fit=crop",
+                    "products_count": 245
+                },
+                {
+                    "id": 2,
+                    "title": "Home & Living",
+                    "slug": "home-living",
+                    "image": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "products_count": 189
+                }
+            ],
+            "todays_deals": [
+                {
+                    "id": 1,
+                    "title": "Handmade Leather Wallet",
+                    "slug": "handmade-leather-wallet",
+                    "price": 45.99,
+                    "discount_price": 29.99,
+                    "final_price": 29.99,
+                    "discount_percentage": 35,
+                    "image": "https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=400&h=400&fit=crop",
+                    "rating": 4.8,
+                    "review_count": 124,
+                    "brand": "LeatherCrafts"
+                }
+            ],
+            "new_arrivals": [],
+            "editors_picks": [],
+            "top100_gifts": []
+        })
+
+
 # ========== HOMEPAGE VIEW ==========
 class HomepageDataView(APIView, CacheMixin):
     """Optimized homepage with Redis caching"""
