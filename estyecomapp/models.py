@@ -447,15 +447,24 @@ class Product(models.Model):
 @receiver(post_delete, sender=Category)
 def invalidate_category_cache(sender, instance, **kwargs):
     cache.delete(CacheKeys.category(instance.slug))
-    cache.delete_pattern('cat:prod:*')
+    if hasattr(cache, 'delete_pattern'):
+        cache.delete_pattern('cat:prod:*')
+    else:
+        # For dummy cache, just delete the homepage
+        cache.delete(CacheKeys.HOMEPAGE)
 
 @receiver(post_save, sender=Product)
 @receiver(post_delete, sender=Product)
 def invalidate_product_caches(sender, instance, **kwargs):
-    cache.delete(CacheKeys.DEALS)
-    cache.delete(CacheKeys.HOMEPAGE)
-    if instance.category:
-        cache.delete_pattern(f'cat:prod:{instance.category.slug}:*')
+    if hasattr(cache, 'delete_pattern'):
+        cache.delete(CacheKeys.DEALS)
+        cache.delete(CacheKeys.HOMEPAGE)
+        if instance.category:
+            cache.delete_pattern(f'cat:prod:{instance.category.slug}:*')
+    else:
+        # For dummy cache
+        cache.delete(CacheKeys.DEALS)
+        cache.delete(CacheKeys.HOMEPAGE)
 
 #::::: TOP 100 GIFTS Model :::::
 class Top100Gifts(models.Model):

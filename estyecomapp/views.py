@@ -1322,6 +1322,7 @@ class HomeFavouritesView(APIView, CacheMixin):
                     {"value": "over100", "label": "Over USD 100"}
                 ]
             }
+
         }
         
         self.set_cached_data(cache_key, response_data)
@@ -1347,40 +1348,328 @@ class FashionFindsView(APIView, CacheMixin):
         
         if not fashion_section:
             fashion_section = HomepageSection.objects.create(
-                title="Fashion Finds",
+                title="Etsy's Guide to Fashion",
                 section_type='fashion_finds',
-                description="Discover fashion items from small shops",
+                description="From custom clothing to timeless jewellery, everything you need to upgrade your wardrobe.",
                 is_active=True,
                 order=0
             )
         
+        # Get Fashion Finds categories
         fashion_categories = Category.objects.filter(
             Q(category_type='fashion_finds') |
-            Q(title__icontains='clothing'),
+            Q(title__icontains='clothing') |
+            Q(title__icontains='jewel') |
+            Q(title__icontains='accessor'),
             is_active=True
         ).distinct()[:12]
         
+        # If no categories, provide default ones
+        if not fashion_categories.exists():
+            # Create default categories or return empty list
+            fashion_categories = []
+        
+        # Get Fashion Shops We Love
         fashion_shops = FashionShop.objects.filter(
             is_featured=True
         ).prefetch_related('featured_products').order_by('order')[:4]
         
+        # If no shops exist, provide default mock shops
+        if not fashion_shops.exists():
+            # Create default shops data directly in the response
+            fashion_shops_data = [
+                {
+                    "id": 1,
+                    "name": "SbriStudio",
+                    "slug": "sbristudio",
+                    "rating": 5.0,
+                    "review_count": 2841,
+                    "display_name": "Sbristudio",
+                    "description": "Handmade fashion items",
+                    "is_featured": True,
+                    "order": 0,
+                    "featured_products_preview": []
+                },
+                {
+                    "id": 2,
+                    "name": "Plexida",
+                    "slug": "plexida",
+                    "rating": 5.0,
+                    "review_count": 2092,
+                    "display_name": "Plexida",
+                    "description": "Unique fashion accessories",
+                    "is_featured": True,
+                    "order": 1,
+                    "featured_products_preview": []
+                },
+                {
+                    "id": 3,
+                    "name": "GemBlue",
+                    "slug": "gemblue",
+                    "rating": 5.0,
+                    "review_count": 2473,
+                    "display_name": "GemBlue",
+                    "description": "Jewellery and accessories",
+                    "is_featured": True,
+                    "order": 2,
+                    "featured_products_preview": []
+                },
+                {
+                    "id": 4,
+                    "name": "LetterParty",
+                    "slug": "letterparty",
+                    "rating": 5.0,
+                    "review_count": 273,
+                    "display_name": "LetterParty",
+                    "description": "Personalised fashion items",
+                    "is_featured": True,
+                    "order": 3,
+                    "featured_products_preview": []
+                }
+            ]
+        else:
+            fashion_shops_data = FashionShopSerializer(fashion_shops, many=True).data
+        
+        # Get personalised clothes products
         personalised_clothes = Product.objects.filter(
             Q(title__icontains='personalised') |
-            Q(title__icontains='custom'),
+            Q(title__icontains='custom') |
+            Q(title__icontains='embroidered'),
             is_available=True,
             in_stock__gt=0
         ).distinct().order_by('-rating')[:20]
+        
+        # If no products, provide mock products
+        if not personalised_clothes.exists():
+            personalised_clothes_products_data = [
+                {
+                    "id": 1,
+                    "title": "Custom Embroidered Portrait from Photo",
+                    "slug": "custom-embroidered-portrait",
+                    "short_description": "Custom embroidery portrait from your photo",
+                    "price": 15.48,
+                    "discount_price": 25.8,
+                    "discount_percentage": 40,
+                    "final_price": 15.48,
+                    "main": "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=400&h=500&fit=crop",
+                    "rating": 4.7,
+                    "review_count": 3200,
+                    "is_featured": True,
+                    "is_bestseller": True,
+                    "is_deal": True,
+                    "is_new_arrival": False,
+                    "condition": "handmade",
+                    "color": "White",
+                    "shop_name": "TypeCityCo",
+                    "etsy_pick": True,
+                    "freeDelivery": False,
+                    "has_video": False
+                }
+            ]
+        else:
+            personalised_clothes_products_data = ProductListSerializer(personalised_clothes, many=True).data
+        
+        # Get unique handbags products
+        unique_handbags = Product.objects.filter(
+            Q(title__icontains='handbag') |
+            Q(title__icontains='purse') |
+            Q(title__icontains='tote') |
+            Q(title__icontains='bag'),
+            is_available=True,
+            in_stock__gt=0
+        ).distinct().order_by('-rating')[:20]
+        
+        if not unique_handbags.exists():
+            unique_handbags_products_data = [
+                {
+                    "id": 101,
+                    "title": "Black Handwoven Leather Purse - Adjustable",
+                    "slug": "black-handwoven-leather-purse",
+                    "short_description": "Handwoven leather purse with adjustable strap",
+                    "price": 75.0,
+                    "discount_price": None,
+                    "discount_percentage": 0,
+                    "final_price": 75.0,
+                    "main": "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=400&h=500&fit=crop",
+                    "rating": 4.8,
+                    "review_count": 892,
+                    "is_featured": True,
+                    "is_bestseller": False,
+                    "is_deal": False,
+                    "is_new_arrival": False,
+                    "condition": "handmade",
+                    "color": "Black",
+                    "shop_name": "LeatherCraftCo",
+                    "etsy_pick": True,
+                    "freeDelivery": True,
+                    "has_video": False
+                }
+            ]
+        else:
+            unique_handbags_products_data = ProductListSerializer(unique_handbags, many=True).data
+        
+        # Get personalised jewellery products
+        personalised_jewellery = Product.objects.filter(
+            Q(title__icontains='jewellery') |
+            Q(title__icontains='jewelry') |
+            Q(title__icontains='necklace') |
+            Q(title__icontains='ring') |
+            Q(title__icontains='bracelet'),
+            is_available=True,
+            in_stock__gt=0
+        ).distinct().order_by('-rating')[:20]
+        
+        if not personalised_jewellery.exists():
+            personalised_jewellery_products_data = [
+                {
+                    "id": 201,
+                    "title": "Personalized gold plated secret locket necklace",
+                    "slug": "personalized-gold-locket",
+                    "short_description": "Gold plated secret locket necklace",
+                    "price": 221.56,
+                    "discount_price": None,
+                    "discount_percentage": 0,
+                    "final_price": 221.56,
+                    "main": "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=400&h=500&fit=crop",
+                    "rating": 4.9,
+                    "review_count": 186,
+                    "is_featured": True,
+                    "is_bestseller": True,
+                    "is_deal": False,
+                    "is_new_arrival": False,
+                    "condition": "handmade",
+                    "color": "Gold",
+                    "shop_name": "Isabellebshop",
+                    "etsy_pick": True,
+                    "freeDelivery": True,
+                    "has_video": False
+                }
+            ]
+        else:
+            personalised_jewellery_products_data = ProductListSerializer(personalised_jewellery, many=True).data
+        
+        # Get promo cards
+        promo_cards = FashionPromoCard.objects.filter(
+            is_active=True
+        ).order_by('order')[:2]
+        
+        if not promo_cards.exists():
+            promo_cards_data = [
+                {
+                    "id": 1,
+                    "title": "Elevate your everyday jewellery",
+                    "subtitle": "Discover unique pieces",
+                    "description": "Find jewellery that complements your style",
+                    "image": "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=600&h=400&fit=crop",
+                    "button_text": "Shop now",
+                    "button_url": "/jewellery",
+                    "order": 0,
+                    "is_active": True
+                },
+                {
+                    "id": 2,
+                    "title": "The Charm Shop",
+                    "subtitle": "Personalised charms",
+                    "description": "Create your own charm collection",
+                    "image": "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=600&h=400&fit=crop",
+                    "button_text": "Shop now",
+                    "button_url": "/charms",
+                    "order": 1,
+                    "is_active": True
+                }
+            ]
+        else:
+            promo_cards_data = FashionPromoCardSerializer(promo_cards, many=True).data
+        
+        # Get trending section
+        trending = FashionTrending.objects.filter(
+            is_active=True
+        )[:1]
+        
+        if not trending.exists():
+            trending_data = [
+                {
+                    "id": 1,
+                    "title": "Trending now: Burgundy hues",
+                    "subtitle": "Winter collection",
+                    "description": "Jump into one of our favourite colours for winter. The deep shade will bring a moody vibe to any outfit as we move into chillier temperatures.",
+                    "image": "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=800&h=600&fit=crop",
+                    "button_text": "Try it out",
+                    "button_url": "/trending/burgundy",
+                    "is_active": True
+                }
+            ]
+        else:
+            trending_data = FashionTrendingSerializer(trending, many=True).data
+        
+        # Get discover more section
+        discover_more = FashionDiscover.objects.filter(
+            is_active=True
+        ).order_by('order')[:4]
+        
+        if not discover_more.exists():
+            discover_more_data = [
+                {
+                    "id": 1,
+                    "title": "Special Starts on Etsy",
+                    "image": "https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=400&h=400&fit=crop",
+                    "url": "/special-starts",
+                    "order": 0,
+                    "is_active": True
+                },
+                {
+                    "id": 2,
+                    "title": "The Linen Shop",
+                    "image": "https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=400&h=400&fit=crop",
+                    "url": "/linen-shop",
+                    "order": 1,
+                    "is_active": True
+                },
+                {
+                    "id": 3,
+                    "title": "The Personalisation Shop",
+                    "image": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&h=400&fit=crop",
+                    "url": "/personalisation-shop",
+                    "order": 2,
+                    "is_active": True
+                },
+                {
+                    "id": 4,
+                    "title": "Etsy's Guide to Vintage",
+                    "image": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "url": "/vintage-guide",
+                    "order": 3,
+                    "is_active": True
+                }
+            ]
+        else:
+            discover_more_data = FashionDiscoverSerializer(discover_more, many=True).data
         
         data = {
             'hero_title': fashion_section.title,
             'hero_description': fashion_section.description,
             'hero_categories': CategoryListSerializer(fashion_categories, many=True).data,
-            'shops_we_love': FashionShopSerializer(fashion_shops, many=True).data,
-            'personalised_clothes_products': ProductListSerializer(personalised_clothes, many=True).data,
+            'shops_we_love': fashion_shops_data,
+            'personalised_clothes_products': personalised_clothes_products_data,
+            'unique_handbags_products': unique_handbags_products_data,
+            'personalised_jewellery_products': personalised_jewellery_products_data,
+            'promo_cards': promo_cards_data,
+            'trending': trending_data,
+            'discover_more': discover_more_data,
+            'filters': {
+                'price_options': [
+                    {'value': 'any', 'label': 'Any price'},
+                    {'value': 'under25', 'label': 'Under USD 25'},
+                    {'value': '25to50', 'label': 'USD 25 to USD 50'},
+                    {'value': '50to100', 'label': 'USD 50 to USD 100'},
+                    {'value': 'over100', 'label': 'Over USD 100'}
+                ]
+            }
         }
         
         self.set_cached_data(cache_key, data)
         return Response(data, status=status.HTTP_200_OK)
+
 
 # ========== GIFT TEASER VIEW ==========
 class GiftTeaserDataView(APIView, CacheMixin):
