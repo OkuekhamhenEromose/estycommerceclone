@@ -28,6 +28,8 @@ urlpatterns = [
     # Products
     path('products/', views.ProductView.as_view(), name='product-list'),
     path('product/<slug:slug>/', views.ProductDetailView.as_view(), name='product-detail'),
+    path('products/upload/', views.ProductUploadView.as_view(), name='product-upload'),
+    path('products/update/<int:product_id>/', views.ProductUploadView.as_view(), name='product-update'),
     
     # Product Reviews
     path('product/<slug:product_slug>/reviews/', views.ProductReviewView.as_view(), name='product-reviews'),

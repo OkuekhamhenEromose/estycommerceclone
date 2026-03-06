@@ -2,6 +2,8 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404, reverse
 from django.db import transaction
@@ -18,6 +20,7 @@ import json
 import logging
 import requests
 from django.utils.text import slugify
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -915,24 +918,69 @@ class BestOfValentineView(APIView, CacheMixin):
                 is_active=True
             )
         
+        # Get Valentine's Day categories
         valentine_categories = Category.objects.filter(
             Q(title__icontains='valentine') |
-            Q(description__icontains='valentine'),
+            Q(description__icontains='valentine') |
+            Q(title__icontains='heart') |
+            Q(title__icontains='love'),
             is_active=True
         ).distinct()[:10]
         
+        # If no categories found, provide default ones
+        categories_data = []
+        if valentine_categories.exists():
+            categories_data = CategoryListSerializer(valentine_categories, many=True).data
+        else:
+            # Create default categories if needed (or return empty array)
+            categories_data = []
+        
+        # Get Valentine's Day products
         products = Product.objects.filter(
             Q(title__icontains='valentine') |
             Q(description__icontains='valentine') |
-            Q(tags__name__icontains='valentine'),
+            Q(tags__name__icontains='valentine') |
+            Q(title__icontains='heart') |
+            Q(title__icontains='love') |
+            Q(category__title__icontains='valentine'),
             is_available=True,
             in_stock__gt=0
         ).distinct().select_related('category', 'brand')[:20]
         
+        products_data = ProductListSerializer(products, many=True).data
+        
+        # ALWAYS include related_searches, even if empty
+        related_searches = [
+            "valentines day gifts",
+            "romantic gifts for him",
+            "romantic gifts for her",
+            "heart jewellery",
+            "personalised valentines",
+            "valentines day cards",
+            "chocolate gifts",
+            "date night ideas",
+            "anniversary gifts",
+            "love themed decor"
+        ]
+        
+        # Apply filters from request
+        price_filter = request.query_params.get('price', 'any')
+        on_sale = request.query_params.get('on_sale', 'false') == 'true'
+        etsy_picks = request.query_params.get('etsy_picks', 'false') == 'true'
+        sort_by = request.query_params.get('sort', 'relevance')
+        
+        # Filter products based on query params (simplified for now)
+        filtered_products = products_data
+        if on_sale:
+            filtered_products = [p for p in filtered_products if p.get('discount_price')]
+        if etsy_picks:
+            filtered_products = [p for p in filtered_products if p.get('etsy_pick')]
+        
         data = {
             'section': GiftGuideSectionSerializer(valentine_section).data,
-            'categories': CategoryListSerializer(valentine_categories, many=True).data,
-            'products': ProductListSerializer(products, many=True).data,
+            'categories': categories_data,
+            'products': filtered_products,
+            'related_searches': related_searches,  # Always include this
             'filters': {
                 'price_options': [
                     {'value': 'any', 'label': 'Any price'},
@@ -947,11 +995,111 @@ class BestOfValentineView(APIView, CacheMixin):
                     {'value': 'high_to_low', 'label': 'Price: High to Low'},
                     {'value': 'top_rated', 'label': 'Top Rated'},
                 ],
+                'shipping_options': [
+                    {'value': 'anywhere', 'label': 'Anywhere'},
+                    {'value': 'US', 'label': 'United States'},
+                    {'value': 'UK', 'label': 'United Kingdom'},
+                    {'value': 'CA', 'label': 'Canada'},
+                    {'value': 'AU', 'label': 'Australia'},
+                ]
+            },
+            'current_filters': {
+                'price': price_filter,
+                'on_sale': on_sale,
+                'etsy_picks': etsy_picks,
+                'sort': sort_by
             }
         }
         
         self.set_cached_data(cache_key, data)
         return Response(data, status=status.HTTP_200_OK)
+
+class ProductUploadView(APIView):
+    """
+    API view for uploading products with images
+    """
+    permission_classes = [IsAuthenticated]  # Only authenticated users can upload
+    parser_classes = [MultiPartParser, FormParser]
+    
+    def post(self, request):
+        try:
+            # Create product instance
+            data = request.data.copy()
+            
+            # Generate slug if not provided
+            if 'slug' not in data or not data['slug']:
+                data['slug'] = slugify(data.get('title', ''))
+            
+            # Handle main image
+            if 'main' in request.FILES:
+                data['main'] = request.FILES['main']
+            
+            # Handle additional images
+            for i in range(1, 5):
+                field_name = f'photo{i}'
+                if field_name in request.FILES:
+                    data[field_name] = request.FILES[field_name]
+            
+            # Set seller to current user
+            data['seller'] = request.user.profile.id if hasattr(request.user, 'profile') else None
+            
+            serializer = ProductSerializer(data=data)
+            if serializer.is_valid():
+                product = serializer.save()
+                
+                # Clear relevant caches
+                cache.delete(CacheKeys.HOMEPAGE)
+                cache.delete(CacheKeys.DEALS)
+                
+                return Response({
+                    'message': 'Product created successfully',
+                    'product': ProductDetailSerializer(product).data
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def put(self, request, product_id):
+        """Update an existing product"""
+        try:
+            product = get_object_or_404(Product, id=product_id)
+            
+            # Check if user is the seller
+            if product.seller and product.seller.user != request.user:
+                return Response({'error': 'You do not have permission to edit this product'}, 
+                              status=status.HTTP_403_FORBIDDEN)
+            
+            data = request.data.copy()
+            
+            # Handle image updates
+            if 'main' in request.FILES:
+                data['main'] = request.FILES['main']
+            
+            for i in range(1, 5):
+                field_name = f'photo{i}'
+                if field_name in request.FILES:
+                    data[field_name] = request.FILES[field_name]
+            
+            serializer = ProductSerializer(product, data=data, partial=True)
+            if serializer.is_valid():
+                product = serializer.save()
+                
+                # Clear caches
+                cache.delete(CacheKeys.product(product.slug))
+                cache.delete(CacheKeys.HOMEPAGE)
+                cache.delete(CacheKeys.DEALS)
+                
+                return Response({
+                    'message': 'Product updated successfully',
+                    'product': ProductDetailSerializer(product).data
+                }, status=status.HTTP_200_OK)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ========== HOME FAVOURITES VIEW ==========
 class HomeFavouritesView(APIView, CacheMixin):
@@ -980,34 +1128,204 @@ class HomeFavouritesView(APIView, CacheMixin):
                 order=0
             )
         
+        # Get Home Favourites categories
         home_categories = Category.objects.filter(
             category_type='home_favourites',
             is_active=True
         )[:6]
         
-        spring_linens = Product.objects.filter(
+        # If no categories found, create default ones
+        if not home_categories.exists():
+            default_home_categories = [
+                "Artisanal Dinnerware",
+                "Outdoor Furniture & Decor",
+                "Garden Decor & Supplies",
+                "Personalised Home Decor",
+                "Candles & Home Fragrance",
+                "Vintage Home Decor"
+            ]
+            
+            for title in default_home_categories:
+                Category.objects.get_or_create(
+                    title=title,
+                    defaults={
+                        'slug': slugify(title),
+                        'category_type': 'home_favourites',
+                        'is_active': True
+                    }
+                )
+            home_categories = Category.objects.filter(category_type='home_favourites', is_active=True)[:6]
+        
+        # Get hero categories (featured categories for the hero section)
+        hero_categories = Category.objects.filter(
+            Q(is_featured=True) | Q(category_type='home_favourites'),
+            is_active=True
+        ).distinct()[:6]
+        
+        # If no hero categories, use some defaults
+        hero_categories_data = []
+        if hero_categories.exists():
+            for cat in hero_categories:
+                hero_categories_data.append({
+                    'title': cat.title,
+                    'image': cat.image.url if cat.image else None,
+                    'slug': cat.slug
+                })
+        else:
+            # Default hero categories
+            hero_categories_data = [
+                {
+                    'title': 'Home Decor',
+                    'image': 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop',
+                    'slug': 'home-decor'
+                },
+                {
+                    'title': 'Kitchen & Dining',
+                    'image': 'https://images.unsplash.com/photo-1548625320-cf6858a7c538?w=400&h=400&fit=crop',
+                    'slug': 'kitchen-dining'
+                },
+                {
+                    'title': 'Furniture',
+                    'image': 'https://images.unsplash.com/photo-1567016376408-0226e1d3d0c6?w=400&h=400&fit=crop',
+                    'slug': 'furniture'
+                },
+                {
+                    'title': 'Vintage Rugs',
+                    'image': 'https://images.unsplash.com/photo-1519710164239-da123dc03ef4?w=400&h=400&fit=crop',
+                    'slug': 'vintage-rugs'
+                },
+                {
+                    'title': 'Lighting',
+                    'image': 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=400&fit=crop',
+                    'slug': 'lighting'
+                },
+                {
+                    'title': 'Bedding',
+                    'image': 'https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&h=400&fit=crop',
+                    'slug': 'bedding'
+                }
+            ]
+        
+        # Get products for Home Favourites sections
+        # Spring-ready linens products
+        spring_linens_products = Product.objects.filter(
             Q(title__icontains='linen') |
-            Q(description__icontains='linen'),
+            Q(description__icontains='linen') |
+            Q(category__title__icontains='linen') |
+            Q(category__title__icontains='bedding'),
             is_available=True,
             in_stock__gt=0
         ).distinct()[:8]
         
-        reorganizing = Product.objects.filter(
+        # Reorganizing products
+        reorganizing_products = Product.objects.filter(
             Q(title__icontains='organizer') |
-            Q(title__icontains='storage'),
+            Q(title__icontains='storage') |
+            Q(title__icontains='organize') |
+            Q(description__icontains='organizer') |
+            Q(description__icontains='storage'),
             is_available=True,
             in_stock__gt=0
         ).distinct()[:8]
         
-        data = {
-            'section': HomepageSectionSerializer(home_favourites_section).data,
-            'home_categories': CategoryListSerializer(home_categories, many=True).data,
-            'spring_linens_products': ProductListSerializer(spring_linens, many=True).data,
-            'reorganizing_products': ProductListSerializer(reorganizing, many=True).data,
+        # Small shops data
+        shops_data = [
+            {
+                "name": "OliveLaneInteriors",
+                "rating": 5,
+                "reviewCount": "100",
+                "images": [
+                    "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1548625320-cf6858a7c538?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1567016376408-0226e1d3d0c6?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=400&fit=crop"
+                ]
+            },
+            {
+                "name": "BrooxFurniture",
+                "rating": 5,
+                "reviewCount": "116",
+                "images": [
+                    "https://images.unsplash.com/photo-1513475382585-d06e58bcb0e0?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1548625320-cf6858a7c538?w=400&h=400&fit=crop"
+                ]
+            },
+            {
+                "name": "ForestlandLinen",
+                "rating": 5,
+                "reviewCount": "4,977",
+                "images": [
+                    "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1567016376408-0226e1d3d0c6?w=400&h=400&fit=crop"
+                ]
+            },
+            {
+                "name": "MDTMobilier",
+                "rating": 3,
+                "reviewCount": "70",
+                "images": [
+                    "https://images.unsplash.com/photo-1548625320-cf6858a7c538?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1513475382585-d06e58bcb0e0?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                    "https://images.unsplash.com/photo-1548625320-cf6858a7c538?w=400&h=400&fit=crop"
+                ]
+            }
+        ]
+        
+        # Discover more categories
+        discover_categories = [
+            {
+                "title": "Special Starts on Etsy",
+                "image": "https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=400&h=400&fit=crop",
+                "slug": "special-starts"
+            },
+            {
+                "title": "Global Seller Spotlight",
+                "image": "https://images.unsplash.com/photo-1567016376408-0226e1d3d0c6?w=400&h=400&fit=crop",
+                "slug": "global-seller"
+            },
+            {
+                "title": "Vintage Home Decor",
+                "image": "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?w=400&h=400&fit=crop",
+                "slug": "vintage-home-decor"
+            },
+            {
+                "title": "Explore Unique Wall Art",
+                "image": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop",
+                "slug": "unique-wall-art"
+            }
+        ]
+        
+        response_data = {
+            "section": {
+                "id": home_favourites_section.id,
+                "title": home_favourites_section.title,
+                "description": home_favourites_section.description,
+                "section_type": home_favourites_section.section_type,
+            },
+            "hero_categories": hero_categories_data,
+            "home_categories": CategoryListSerializer(home_categories, many=True).data,
+            "small_shops": shops_data,
+            "spring_linens_products": ProductListSerializer(spring_linens_products, many=True).data,
+            "reorganizing_products": ProductListSerializer(reorganizing_products, many=True).data,
+            "discover_categories": discover_categories,
+            "filters": {
+                "price_options": [
+                    {"value": "any", "label": "Any price"},
+                    {"value": "under25", "label": "Under USD 25"},
+                    {"value": "25to50", "label": "USD 25 to USD 50"},
+                    {"value": "50to100", "label": "USD 50 to USD 100"},
+                    {"value": "over100", "label": "Over USD 100"}
+                ]
+            }
         }
         
-        self.set_cached_data(cache_key, data)
-        return Response(data, status=status.HTTP_200_OK)
+        self.set_cached_data(cache_key, response_data)
+        return Response(response_data, status=status.HTTP_200_OK)
 
 # ========== FASHION FINDS VIEW ==========
 class FashionFindsView(APIView, CacheMixin):

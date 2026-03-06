@@ -226,6 +226,14 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             cache.set(cache_key, products, 1800)
         return ProductListSerializer(products, many=True).data
 
+
+class ProductSerializer(serializers.ModelSerializer):
+    """Base product serializer for create/update operations"""
+    class Meta:
+        model = Product
+        fields = '__all__'
+        read_only_fields = ['created', 'updated', 'product_id', 'rating', 'review_count']
+        
 # ========== DEALS SERIALIZER ==========
 class DealSerializer(CompactProductSerializer):
     """Special serializer for deals with discount emphasis"""

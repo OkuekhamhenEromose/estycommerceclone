@@ -29,8 +29,8 @@ INSTALLED_APPS = [
     'storages',  # For S3/Cloudflare R2
     
     # Local apps
-    'users.apps.UsersConfig',
-    'estyecomapp.apps.EstyecomappConfig',
+    'users',
+    'estyecomapp',
 ]
 
 # Optimized middleware order
