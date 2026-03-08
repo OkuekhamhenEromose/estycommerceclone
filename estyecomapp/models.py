@@ -1244,7 +1244,7 @@ class AccessoryItem(models.Model):
         null=True, blank=True,
     )
     title           = models.CharField(max_length=255)
-    slug            = models.SlugField(unique=True, blank=True)
+    slug            = models.SlugField(max_length=255, unique=True, blank=True)
     description     = models.TextField(blank=True)
 
     # ── Pricing ────────────────────────────────────────────
