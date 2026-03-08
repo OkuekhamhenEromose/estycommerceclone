@@ -50,6 +50,7 @@ CATEGORY_TYPES = (
     ('gifts', 'Gifts'),
     ('fashion_finds', 'Fashion Finds'),
     ('home_favourites', 'Home Favourites'),
+    ('accessories', 'Accessories'),
 )
 
 # ========== PARENT CATEGORY ==========
@@ -225,10 +226,18 @@ class Brand(models.Model):
     
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        cache.delete_pattern('brand:*')
+        # Check if cache has delete_pattern method (Redis) or fallback
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern('brand:*')
+        else:
+            # For dummy cache, just delete the specific key if needed
+            cache.delete(f'brand:count:{self.id}')
     
     def delete(self, *args, **kwargs):
-        cache.delete_pattern('brand:*')
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern('brand:*')
+        else:
+            cache.delete(f'brand:count:{self.id}')
         super().delete(*args, **kwargs)
 
 # ========== TAG ==========
@@ -408,13 +417,25 @@ class Product(models.Model):
             cache.delete(CacheKeys.product(old_slug))
         cache.delete(CacheKeys.HOMEPAGE)
         cache.delete(CacheKeys.DEALS)
-        cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
-    
+
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
+        else:
+            # For dummy cache, just delete the category cache
+            cache.delete(CacheKeys.category_products(self.category.slug))
+
+
     def delete(self, *args, **kwargs):
         cache.delete(CacheKeys.product(self.slug))
         cache.delete(CacheKeys.HOMEPAGE)
         cache.delete(CacheKeys.DEALS)
-        cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
+
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern(f'cat:prod:{self.category.slug}:*')
+        else:
+            # For dummy cache, just delete the category cache
+            cache.delete(CacheKeys.category_products(self.category.slug))
+
         super().delete(*args, **kwargs)
     
     @property
@@ -1181,3 +1202,112 @@ class AboutGiftFinder(models.Model):
     
     def __str__(self):
         return "About Gift Finder"
+
+
+class AccessorySubCategory(models.Model):
+    """
+    Top-level navigation cards on the Accessories page.
+    e.g. Hair Accessories, Patches & Appliques …
+    """
+    name        = models.CharField(max_length=120)
+    slug        = models.SlugField(unique=True, blank=True)
+    description = models.TextField(blank=True)
+    image_url   = models.URLField(blank=True, help_text="Cover image URL for category card")
+    order       = models.PositiveSmallIntegerField(default=0)
+    is_active   = models.BooleanField(default=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering            = ["order", "name"]
+        verbose_name        = "Accessory Sub-Category"
+        verbose_name_plural = "Accessory Sub-Categories"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class AccessoryItem(models.Model):
+    """
+    A single accessory product listed on the accessories page.
+    Linked to one AccessorySubCategory; supports all sort modes
+    exposed by AccessoriesProductsView.
+    """
+    sub_category    = models.ForeignKey(
+        AccessorySubCategory,
+        on_delete=models.CASCADE,
+        related_name="items",
+        null=True, blank=True,
+    )
+    title           = models.CharField(max_length=255)
+    slug            = models.SlugField(unique=True, blank=True)
+    description     = models.TextField(blank=True)
+
+    # ── Pricing ────────────────────────────────────────────
+    price_usd       = models.DecimalField(max_digits=10, decimal_places=2)
+    original_price  = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Original / RRP price before discount"
+    )
+    discount_pct    = models.PositiveSmallIntegerField(
+        default=0, help_text="Discount percentage e.g. 60"
+    )
+
+    # ── Media ──────────────────────────────────────────────
+    image_url       = models.URLField()
+    shop_name       = models.CharField(max_length=120, blank=True)
+
+    # ── Ratings (used for Top Customer Reviews sort) ───────
+    star_rating     = models.DecimalField(
+        max_digits=3, decimal_places=1, default=0.0,
+        help_text="0.0 – 5.0"
+    )
+    review_count    = models.PositiveIntegerField(default=0)
+
+    # ── Badges / special flags ─────────────────────────────
+    is_star_seller      = models.BooleanField(default=False)
+    is_ad               = models.BooleanField(
+        default=False, help_text="Sponsored / Ad listing"
+    )
+    has_free_delivery   = models.BooleanField(default=False)
+    is_on_sale          = models.BooleanField(default=False)
+    badge_label         = models.CharField(
+        max_length=60, blank=True,
+        help_text="e.g. 'SHIPS FROM USA', 'FAST SHIPPING'"
+    )
+
+    # ── Shop / location (used by Shop Location filter) ─────
+    shop_country    = models.CharField(max_length=80, default="Anywhere")
+
+    # ── Timestamps (used for Most Recent sort) ────────────
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-review_count"]     # default: most reviewed first
+
+    def save(self, *args, **kwargs):
+        # Auto-generate unique slug
+        if not self.slug:
+            base  = slugify(self.title)[:200]
+            slug  = base
+            n     = 1
+            while AccessoryItem.objects.filter(slug=slug).exists():
+                slug = f"{base}-{n}"
+                n   += 1
+            self.slug = slug
+        # Auto-derive is_on_sale
+        if self.original_price and self.original_price > self.price_usd:
+            self.is_on_sale = True
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def discount_label(self):
+        return f"({self.discount_pct}% off)" if self.discount_pct else ""

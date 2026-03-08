@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404, reverse
 from django.db import transaction
-from django.db.models import Q, Prefetch, Avg  # Added Avg here
+from django.db.models import Q, Prefetch, Avg, Min, Max  # Added Avg here
 from django.core.cache import cache
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
@@ -2444,3 +2444,212 @@ class MarkOrderAsGiftView(APIView):
             'message': 'Item unmarked as gift',
             'cart_product_id': cart_product_id
         }, status=status.HTTP_200_OK)
+
+# ══════════════════════════════════════════════════════════════════
+# ACCESSORIES CATEGORY VIEW
+# GET /api/accessories/categories/
+# Returns:
+#   parent        – name, slug, description of "Accessories" group
+#   categories    – all 12 sub-categories (full list)
+#   categories_row1 – first 6  (used by "show first 6" on page load)
+#   categories_row2 – remaining (revealed by "Show more" button)
+# ══════════════════════════════════════════════════════════════════
+class AccessoriesCategoryView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 3600  # 1 hour — categories rarely change
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "accessories:categories")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        cats = AccessorySubCategory.objects.filter(is_active=True).order_by("order")
+        cats_data = AccessorySubCategorySerializer(cats, many=True).data
+
+        data = {
+            "parent": {
+                "name":        "Accessories",
+                "slug":        "accessories",
+                "description": "Scarves, hats and hair accessories that tie it all together",
+            },
+            "categories":      cats_data,
+            "categories_row1": cats_data[:6],   # always visible
+            "categories_row2": cats_data[6:],   # revealed by Show More
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# ACCESSORIES PRODUCTS VIEW
+# GET /api/accessories/products/
+# GET /api/accessories/category/<slug>/   (filter by sub-category)
+#
+# Query params:
+#   sort          relevance | lowest_price | highest_price |
+#                 top_reviews | most_recent
+#   min_price     decimal
+#   max_price     decimal
+#   on_sale       true
+#   free_delivery true
+#   is_star_seller true
+#   shop_location Anywhere | Nigeria | <country>
+#   page          1 (default)
+#   page_size     8 (default)
+# ══════════════════════════════════════════════════════════════════
+class AccessoriesProductsView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 600   # 10 min — products change more often
+    pagination_class = FastPagination
+
+    def get(self, request, category_slug=None):
+        cache_key = self.get_cache_key(
+            request, f"accessories:products:{category_slug or 'all'}"
+        )
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        # ── Base queryset ─────────────────────────────────
+        qs = AccessoryItem.objects.select_related("sub_category")
+
+        # ── Sub-category filter ───────────────────────────
+        current_category = None
+        if category_slug:
+            try:
+                cat = AccessorySubCategory.objects.get(
+                    slug=category_slug, is_active=True
+                )
+                qs = qs.filter(sub_category=cat)
+                current_category = AccessorySubCategorySerializer(cat).data
+            except AccessorySubCategory.DoesNotExist:
+                return Response(
+                    {"error": "Category not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        # ── Checkbox / radio filters ──────────────────────
+        if request.query_params.get("on_sale") == "true":
+            qs = qs.filter(is_on_sale=True)
+
+        if request.query_params.get("free_delivery") == "true":
+            qs = qs.filter(has_free_delivery=True)
+
+        if request.query_params.get("is_star_seller") == "true":
+            qs = qs.filter(is_star_seller=True)
+
+        shop_location = request.query_params.get("shop_location", "")
+        if shop_location and shop_location.lower() not in ("", "anywhere"):
+            qs = qs.filter(shop_country__icontains=shop_location)
+
+        # ── Price range ───────────────────────────────────
+        min_price = request.query_params.get("min_price")
+        max_price = request.query_params.get("max_price")
+        if min_price:
+            qs = qs.filter(price_usd__gte=min_price)
+        if max_price:
+            qs = qs.filter(price_usd__lte=max_price)
+
+        # ── Sorting ───────────────────────────────────────
+        sort_map = {
+            "relevance":    ["-review_count", "-star_rating"],
+            "lowest_price": ["price_usd"],
+            "highest_price":["-price_usd"],
+            "top_reviews":  ["-star_rating", "-review_count"],
+            "most_recent":  ["-created_at"],
+        }
+        sort_key = request.query_params.get("sort", "relevance")
+        qs = qs.order_by(*sort_map.get(sort_key, sort_map["relevance"]))
+
+        total = qs.count()
+
+        # ── Pagination ────────────────────────────────────
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = AccessoryItemSerializer(page, many=True)
+        result = paginator.get_paginated_response(serializer.data).data
+
+        # ── Extra metadata ────────────────────────────────
+        result["total_products"] = total
+        result["sort_options"] = [
+            {"value": "relevance",    "label": "Relevance"},
+            {"value": "lowest_price", "label": "Lowest Price"},
+            {"value": "highest_price","label": "Highest Price"},
+            {"value": "top_reviews",  "label": "Top Customer Reviews"},
+            {"value": "most_recent",  "label": "Most Recent"},
+        ]
+        result["active_sort"] = sort_key
+
+        if current_category:
+            result["current_category"] = current_category
+
+        # ── Filter options (dynamic from queryset) ────────
+        price_min = qs.aggregate(Min("price_usd"))["price_usd__min"] or 0
+        price_max = qs.aggregate(Max("price_usd"))["price_usd__max"] or 1000
+        result["filter_options"] = {
+            "price_range": {
+                "min": float(price_min),
+                "max": float(price_max),
+            },
+            "has_sale_items":         qs.filter(is_on_sale=True).exists(),
+            "has_free_delivery_items":qs.filter(has_free_delivery=True).exists(),
+            "has_star_sellers":       qs.filter(is_star_seller=True).exists(),
+        }
+
+        self.set_cached_data(cache_key, result)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# ACCESSORIES FILTERS VIEW
+# GET /api/accessories/filters/
+# Returns all available filter metadata (price range, badges, etc.)
+# Used to populate the sidebar filter drawer on first render.
+# ══════════════════════════════════════════════════════════════════
+class AccessoriesFiltersView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 1800  # 30 min
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "accessories:filters")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        qs = AccessoryItem.objects.all()
+
+        agg = qs.aggregate(
+            price_min=Min("price_usd"),
+            price_max=Max("price_usd"),
+        )
+
+        data = {
+            "price_range": {
+                "min": float(agg["price_min"] or 0),
+                "max": float(agg["price_max"] or 1000),
+            },
+            "special_offers": [
+                {"key": "free_delivery", "label": "FREE delivery"},
+                {"key": "on_sale",       "label": "On sale"},
+            ],
+            "shop_locations": ["Anywhere", "Nigeria", "Custom"],
+            "item_formats": ["All", "Physical items", "Digital downloads"],
+            "etsy_best": [
+                {"key": "is_star_seller", "label": "Etsy's Pick"},
+            ],
+            "sort_options": [
+                {"value": "relevance",    "label": "Relevance"},
+                {"value": "lowest_price", "label": "Lowest Price"},
+                {"value": "highest_price","label": "Highest Price"},
+                {"value": "top_reviews",  "label": "Top Customer Reviews"},
+                {"value": "most_recent",  "label": "Most Recent"},
+            ],
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)
+
+
+
+
+
