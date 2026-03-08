@@ -81,4 +81,8 @@ urlpatterns = [
     path('accessories/products/', views.AccessoriesProductsView.as_view(), name='accessories-products'),
     path('accessories/category/<slug:category_slug>/', views.AccessoriesProductsView.as_view(), name='accessories-category-products'),
     path('accessories/filters/', views.AccessoriesFiltersView.as_view(), name='accessories-filters'),
+    path("art-collectibles/categories/",    views.ArtCategoryView.as_view(),  name="art-categories"),
+    path("art-collectibles/products/",      views.ArtProductsView.as_view(),  name="art-products"),
+    path("art-collectibles/category/<slug:category_slug>/", views.ArtProductsView.as_view(), name="art-category-products"),
+    path("art-collectibles/filters/",       views.ArtFiltersView.as_view(),   name="art-filters"),
 ]

@@ -536,3 +536,31 @@ class AccessoryItemSerializer(serializers.ModelSerializer):
             "sub_category", "sub_category_name", "sub_category_slug",
             "created_at",
         ]
+
+class ArtSubCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = ArtSubCategory
+        fields = ["id", "name", "slug", "description", "image_url", "order"]
+
+
+class ArtItemSerializer(serializers.ModelSerializer):
+    sub_category_name = serializers.CharField(
+        source="sub_category.name", read_only=True
+    )
+    sub_category_slug = serializers.CharField(
+        source="sub_category.slug", read_only=True
+    )
+    discount_label = serializers.CharField(read_only=True)
+
+    class Meta:
+        model  = ArtItem
+        fields = [
+            "id", "title", "slug", "description",
+            "price_usd", "original_price", "discount_pct", "discount_label",
+            "image_url", "shop_name",
+            "star_rating", "review_count",
+            "is_star_seller", "is_ad", "has_free_delivery", "is_on_sale",
+            "is_digital_download", "badge_label", "shop_country",
+            "sub_category", "sub_category_name", "sub_category_slug",
+            "created_at",
+        ]

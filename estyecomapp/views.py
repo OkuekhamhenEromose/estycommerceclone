@@ -2649,7 +2649,188 @@ class AccessoriesFiltersView(APIView, CacheMixin):
         self.set_cached_data(cache_key, data)
         return Response(data, status=status.HTTP_200_OK)
 
+# ══════════════════════════════════════════════════════════════════
+# ART & COLLECTIBLES CATEGORY VIEW
+# GET /api/art-collectibles/categories/
+# ══════════════════════════════════════════════════════════════════
+class ArtCategoryView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 3600
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "art:categories")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        cats = ArtSubCategory.objects.filter(is_active=True).order_by("order")
+        cats_data = ArtSubCategorySerializer(cats, many=True).data
+
+        data = {
+            "parent": {
+                "name":        "Art & Collectibles",
+                "slug":        "art-collectibles",
+                "description": "Custom artwork, portraits, and totally original paintings and prints to turn your home into a gallery",
+            },
+            "categories":      cats_data,
+            "categories_row1": cats_data[:6],
+            "categories_row2": cats_data[6:],
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)
 
 
+# ══════════════════════════════════════════════════════════════════
+# ART & COLLECTIBLES PRODUCTS VIEW
+# GET /api/art-collectibles/products/
+# GET /api/art-collectibles/category/<slug>/
+#
+# Query params:
+#   sort          relevance | lowest_price | highest_price |
+#                 top_reviews | most_recent
+#   min_price     decimal
+#   max_price     decimal
+#   on_sale       true
+#   free_delivery true
+#   is_star_seller true
+#   digital_download true
+#   shop_location Anywhere | Nigeria | <country>
+#   page          1 (default)
+#   page_size     8 (default)
+# ══════════════════════════════════════════════════════════════════
+class ArtProductsView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 600
+    pagination_class = FastPagination
+
+    def get(self, request, category_slug=None):
+        cache_key = self.get_cache_key(
+            request, f"art:products:{category_slug or 'all'}"
+        )
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        qs = ArtItem.objects.select_related("sub_category")
+
+        current_category = None
+        if category_slug:
+            try:
+                cat = ArtSubCategory.objects.get(slug=category_slug, is_active=True)
+                qs = qs.filter(sub_category=cat)
+                current_category = ArtSubCategorySerializer(cat).data
+            except ArtSubCategory.DoesNotExist:
+                return Response(
+                    {"error": "Category not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        if request.query_params.get("on_sale") == "true":
+            qs = qs.filter(is_on_sale=True)
+        if request.query_params.get("free_delivery") == "true":
+            qs = qs.filter(has_free_delivery=True)
+        if request.query_params.get("is_star_seller") == "true":
+            qs = qs.filter(is_star_seller=True)
+        if request.query_params.get("digital_download") == "true":
+            qs = qs.filter(is_digital_download=True)
+
+        shop_location = request.query_params.get("shop_location", "")
+        if shop_location and shop_location.lower() not in ("", "anywhere"):
+            qs = qs.filter(shop_country__icontains=shop_location)
+
+        min_price = request.query_params.get("min_price")
+        max_price = request.query_params.get("max_price")
+        if min_price:
+            qs = qs.filter(price_usd__gte=min_price)
+        if max_price:
+            qs = qs.filter(price_usd__lte=max_price)
+
+        sort_map = {
+            "relevance":    ["-review_count", "-star_rating"],
+            "lowest_price": ["price_usd"],
+            "highest_price":["-price_usd"],
+            "top_reviews":  ["-star_rating", "-review_count"],
+            "most_recent":  ["-created_at"],
+        }
+        sort_key = request.query_params.get("sort", "relevance")
+        qs = qs.order_by(*sort_map.get(sort_key, sort_map["relevance"]))
+
+        total = qs.count()
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = ArtItemSerializer(page, many=True)
+        result = paginator.get_paginated_response(serializer.data).data
+
+        result["total_products"] = total
+        result["sort_options"] = [
+            {"value": "relevance",    "label": "Relevance"},
+            {"value": "lowest_price", "label": "Lowest Price"},
+            {"value": "highest_price","label": "Highest Price"},
+            {"value": "top_reviews",  "label": "Top Customer Reviews"},
+            {"value": "most_recent",  "label": "Most Recent"},
+        ]
+        result["active_sort"] = sort_key
+
+        if current_category:
+            result["current_category"] = current_category
+
+        price_min = qs.aggregate(Min("price_usd"))["price_usd__min"] or 0
+        price_max = qs.aggregate(Max("price_usd"))["price_usd__max"] or 1000
+        result["filter_options"] = {
+            "price_range": {
+                "min": float(price_min),
+                "max": float(price_max),
+            },
+            "has_sale_items":          qs.filter(is_on_sale=True).exists(),
+            "has_free_delivery_items": qs.filter(has_free_delivery=True).exists(),
+            "has_star_sellers":        qs.filter(is_star_seller=True).exists(),
+            "has_digital_downloads":   qs.filter(is_digital_download=True).exists(),
+        }
+
+        self.set_cached_data(cache_key, result)
+        return Response(result, status=status.HTTP_200_OK)
 
 
+# ══════════════════════════════════════════════════════════════════
+# ART & COLLECTIBLES FILTERS VIEW
+# GET /api/art-collectibles/filters/
+# ══════════════════════════════════════════════════════════════════
+class ArtFiltersView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 1800
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "art:filters")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        qs = ArtItem.objects.all()
+        agg = qs.aggregate(price_min=Min("price_usd"), price_max=Max("price_usd"))
+
+        data = {
+            "price_range": {
+                "min": float(agg["price_min"] or 0),
+                "max": float(agg["price_max"] or 1000),
+            },
+            "special_offers": [
+                {"key": "free_delivery",     "label": "FREE delivery"},
+                {"key": "on_sale",           "label": "On sale"},
+                {"key": "digital_download",  "label": "Digital downloads"},
+            ],
+            "shop_locations": ["Anywhere", "Nigeria", "Custom"],
+            "item_formats": ["All", "Physical items", "Digital downloads"],
+            "etsy_best": [
+                {"key": "is_star_seller", "label": "Etsy's Pick"},
+            ],
+            "sort_options": [
+                {"value": "relevance",    "label": "Relevance"},
+                {"value": "lowest_price", "label": "Lowest Price"},
+                {"value": "highest_price","label": "Highest Price"},
+                {"value": "top_reviews",  "label": "Top Customer Reviews"},
+                {"value": "most_recent",  "label": "Most Recent"},
+            ],
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)

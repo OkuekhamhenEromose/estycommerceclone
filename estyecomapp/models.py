@@ -1311,3 +1311,104 @@ class AccessoryItem(models.Model):
     @property
     def discount_label(self):
         return f"({self.discount_pct}% off)" if self.discount_pct else ""
+
+class ArtSubCategory(models.Model):
+    """
+    Top-level navigation cards on the Art & Collectibles page.
+    e.g. Prints, Painting, Sculpture …
+    """
+    name        = models.CharField(max_length=120)
+    slug        = models.SlugField(unique=True, blank=True)
+    description = models.TextField(blank=True)
+    image_url   = models.URLField(blank=True, help_text="Cover image URL for category card")
+    order       = models.PositiveSmallIntegerField(default=0)
+    is_active   = models.BooleanField(default=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering            = ["order", "name"]
+        verbose_name        = "Art Sub-Category"
+        verbose_name_plural = "Art Sub-Categories"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class ArtItem(models.Model):
+    """
+    A single art/collectibles product listed on the Art & Collectibles page.
+    Linked to one ArtSubCategory.
+    """
+    sub_category    = models.ForeignKey(
+        ArtSubCategory,
+        on_delete=models.CASCADE,
+        related_name="items",
+        null=True, blank=True,
+    )
+    title           = models.CharField(max_length=255)
+    slug            = models.SlugField(max_length=255, unique=True, blank=True)
+    description     = models.TextField(blank=True)
+
+    # ── Pricing ────────────────────────────────────────────
+    price_usd       = models.DecimalField(max_digits=10, decimal_places=2)
+    original_price  = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Original / RRP price before discount"
+    )
+    discount_pct    = models.PositiveSmallIntegerField(
+        default=0, help_text="Discount percentage e.g. 25"
+    )
+
+    # ── Media ──────────────────────────────────────────────
+    image_url       = models.URLField()
+    shop_name       = models.CharField(max_length=120, blank=True)
+
+    # ── Ratings ────────────────────────────────────────────
+    star_rating     = models.DecimalField(
+        max_digits=3, decimal_places=1, default=0.0,
+        help_text="0.0 – 5.0"
+    )
+    review_count    = models.PositiveIntegerField(default=0)
+
+    # ── Badges / special flags ─────────────────────────────
+    is_star_seller      = models.BooleanField(default=False)
+    is_ad               = models.BooleanField(default=False)
+    has_free_delivery   = models.BooleanField(default=False)
+    is_on_sale          = models.BooleanField(default=False)
+    is_digital_download = models.BooleanField(default=False, help_text="Digital download product")
+    badge_label         = models.CharField(max_length=60, blank=True)
+
+    # ── Shop / location ────────────────────────────────────
+    shop_country    = models.CharField(max_length=80, default="Anywhere")
+
+    # ── Timestamps ────────────────────────────────────────
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-review_count"]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base  = slugify(self.title)[:200]
+            slug  = base
+            n     = 1
+            while ArtItem.objects.filter(slug=slug).exists():
+                slug = f"{base}-{n}"
+                n   += 1
+            self.slug = slug
+        if self.original_price and self.original_price > self.price_usd:
+            self.is_on_sale = True
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def discount_label(self):
+        return f"({self.discount_pct}% off)" if self.discount_pct else ""
