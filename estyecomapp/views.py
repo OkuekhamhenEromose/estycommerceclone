@@ -2834,3 +2834,196 @@ class ArtFiltersView(APIView, CacheMixin):
         }
         self.set_cached_data(cache_key, data)
         return Response(data, status=status.HTTP_200_OK)
+
+# ── Append this to the bottom of estyecomapp/views.py ────────────────────────
+
+# ══════════════════════════════════════════════════════════════════
+# BABY CATEGORY VIEW
+# GET /api/baby/categories/
+# Returns:
+#   parent        – name, slug, description of "Baby" group
+#   categories    – all sub-categories (full list)
+#   categories_row1 – first 6  (visible on page load)
+#   categories_row2 – remaining (revealed by "Show more")
+# ══════════════════════════════════════════════════════════════════
+class BabyCategoryView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 3600
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "baby:categories")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        cats = BabySubCategory.objects.filter(is_active=True).order_by("order")
+        cats_data = BabySubCategorySerializer(cats, many=True).data
+
+        data = {
+            "parent": {
+                "name":        "Baby",
+                "slug":        "baby",
+                "description": "Adorable baby clothes, nursery essentials, toys and care products for your little one",
+            },
+            "categories":      cats_data,
+            "categories_row1": cats_data[:6],
+            "categories_row2": cats_data[6:],
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# BABY PRODUCTS VIEW
+# GET /api/baby/products/
+# GET /api/baby/category/<slug>/
+#
+# Query params:
+#   sort          relevance | lowest_price | highest_price |
+#                 top_reviews | most_recent
+#   min_price     decimal
+#   max_price     decimal
+#   on_sale       true
+#   free_delivery true
+#   is_star_seller true
+#   is_personalised true
+#   shop_location Anywhere | <country>
+#   page          1 (default)
+#   page_size     8 (default)
+# ══════════════════════════════════════════════════════════════════
+class BabyProductsView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 600
+    pagination_class = FastPagination
+
+    def get(self, request, category_slug=None):
+        cache_key = self.get_cache_key(
+            request, f"baby:products:{category_slug or 'all'}"
+        )
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        qs = BabyItem.objects.select_related("sub_category")
+
+        current_category = None
+        if category_slug:
+            try:
+                cat = BabySubCategory.objects.get(slug=category_slug, is_active=True)
+                qs = qs.filter(sub_category=cat)
+                current_category = BabySubCategorySerializer(cat).data
+            except BabySubCategory.DoesNotExist:
+                return Response(
+                    {"error": "Category not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        if request.query_params.get("on_sale") == "true":
+            qs = qs.filter(is_on_sale=True)
+        if request.query_params.get("free_delivery") == "true":
+            qs = qs.filter(has_free_delivery=True)
+        if request.query_params.get("is_star_seller") == "true":
+            qs = qs.filter(is_star_seller=True)
+        if request.query_params.get("is_personalised") == "true":
+            qs = qs.filter(is_personalised=True)
+
+        shop_location = request.query_params.get("shop_location", "")
+        if shop_location and shop_location.lower() not in ("", "anywhere"):
+            qs = qs.filter(shop_country__icontains=shop_location)
+
+        min_price = request.query_params.get("min_price")
+        max_price = request.query_params.get("max_price")
+        if min_price:
+            qs = qs.filter(price_usd__gte=min_price)
+        if max_price:
+            qs = qs.filter(price_usd__lte=max_price)
+
+        sort_map = {
+            "relevance":    ["-review_count", "-star_rating"],
+            "lowest_price": ["price_usd"],
+            "highest_price":["-price_usd"],
+            "top_reviews":  ["-star_rating", "-review_count"],
+            "most_recent":  ["-created_at"],
+        }
+        sort_key = request.query_params.get("sort", "relevance")
+        qs = qs.order_by(*sort_map.get(sort_key, sort_map["relevance"]))
+
+        total = qs.count()
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = BabyItemSerializer(page, many=True)
+        result = paginator.get_paginated_response(serializer.data).data
+
+        result["total_products"] = total
+        result["sort_options"] = [
+            {"value": "relevance",    "label": "Relevance"},
+            {"value": "lowest_price", "label": "Lowest Price"},
+            {"value": "highest_price","label": "Highest Price"},
+            {"value": "top_reviews",  "label": "Top Customer Reviews"},
+            {"value": "most_recent",  "label": "Most Recent"},
+        ]
+        result["active_sort"] = sort_key
+
+        if current_category:
+            result["current_category"] = current_category
+
+        price_min = qs.aggregate(Min("price_usd"))["price_usd__min"] or 0
+        price_max = qs.aggregate(Max("price_usd"))["price_usd__max"] or 1000
+        result["filter_options"] = {
+            "price_range": {
+                "min": float(price_min),
+                "max": float(price_max),
+            },
+            "has_sale_items":          qs.filter(is_on_sale=True).exists(),
+            "has_free_delivery_items": qs.filter(has_free_delivery=True).exists(),
+            "has_star_sellers":        qs.filter(is_star_seller=True).exists(),
+            "has_personalised_items":  qs.filter(is_personalised=True).exists(),
+        }
+
+        self.set_cached_data(cache_key, result)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# BABY FILTERS VIEW
+# GET /api/baby/filters/
+# ══════════════════════════════════════════════════════════════════
+class BabyFiltersView(APIView, CacheMixin):
+    permission_classes = [AllowAny]
+    cache_timeout = 1800
+
+    def get(self, request):
+        cache_key = self.get_cache_key(request, "baby:filters")
+        cached = self.get_cached_data(cache_key)
+        if cached:
+            return Response(cached, status=status.HTTP_200_OK)
+
+        qs = BabyItem.objects.all()
+        agg = qs.aggregate(price_min=Min("price_usd"), price_max=Max("price_usd"))
+
+        data = {
+            "price_range": {
+                "min": float(agg["price_min"] or 0),
+                "max": float(agg["price_max"] or 1000),
+            },
+            "special_offers": [
+                {"key": "free_delivery",   "label": "FREE delivery"},
+                {"key": "on_sale",         "label": "On sale"},
+                {"key": "is_personalised", "label": "Personalised"},
+            ],
+            "shop_locations": ["Anywhere", "Nigeria", "Custom"],
+            "item_formats": ["All", "Physical items"],
+            "etsy_best": [
+                {"key": "is_star_seller", "label": "Etsy's Pick"},
+            ],
+            "sort_options": [
+                {"value": "relevance",    "label": "Relevance"},
+                {"value": "lowest_price", "label": "Lowest Price"},
+                {"value": "highest_price","label": "Highest Price"},
+                {"value": "top_reviews",  "label": "Top Customer Reviews"},
+                {"value": "most_recent",  "label": "Most Recent"},
+            ],
+        }
+        self.set_cached_data(cache_key, data)
+        return Response(data, status=status.HTTP_200_OK)
