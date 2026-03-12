@@ -85,4 +85,8 @@ urlpatterns = [
     path("art-collectibles/products/",      views.ArtProductsView.as_view(),  name="art-products"),
     path("art-collectibles/category/<slug:category_slug>/", views.ArtProductsView.as_view(), name="art-category-products"),
     path("art-collectibles/filters/",       views.ArtFiltersView.as_view(),   name="art-filters"),
+    path("baby/categories/",                         views.BabyCategoryView.as_view(),  name="baby-categories"),
+    path("baby/products/",                           views.BabyProductsView.as_view(),  name="baby-products"),
+    path("baby/category/<slug:category_slug>/",      views.BabyProductsView.as_view(),  name="baby-category-products"),
+    path("baby/filters/",                            views.BabyFiltersView.as_view(),   name="baby-filters"),
 ]
